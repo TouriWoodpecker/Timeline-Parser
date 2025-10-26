@@ -19,7 +19,7 @@ export const TextInput: React.FC<TextInputProps> = ({ value, onChange, isLoading
       onChange={onChange}
       placeholder={placeholderText}
       readOnly={isLoading}
-      className="w-full h-80 p-4 border border-black/20 rounded-lg focus:ring-2 focus:ring-black focus:border-black transition-shadow duration-200 text-sm bg-white resize-y disabled:bg-black/5 disabled:cursor-not-allowed"
+      className="w-full h-80 p-4 border border-[var(--color-outline)] rounded-[var(--radius-m)] bg-transparent focus:outline-none focus:ring-0 focus:border-2 focus:border-[var(--color-primary)] transition-all duration-200 text-base resize-y disabled:cursor-not-allowed disabled:bg-[var(--color-on-surface)]/5 disabled:border-[var(--color-on-surface)]/10 text-[var(--color-on-surface)] placeholder-[var(--color-on-surface-variant)] leading-relaxed"
       aria-label="Protocol Text Input"
       disabled={isLoading}
     />

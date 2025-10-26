@@ -6,9 +6,9 @@ interface ErrorMessageProps {
 
 export const ErrorMessage: React.FC<ErrorMessageProps> = ({ message }) => {
   return (
-    <div className="bg-red-50 border-l-4 border-red-500 text-red-900 p-4 my-4" role="alert">
+    <div className="bg-[var(--color-error-container)]/50 border-l-4 border-[var(--color-error)] text-[var(--color-error)] p-4 my-4 rounded-r-lg" role="alert">
       <p className="font-bold">Error</p>
-      <p>{message}</p>
+      <pre className="whitespace-pre-wrap font-sans">{message}</pre>
     </div>
   );
 };

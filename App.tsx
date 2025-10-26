@@ -1,9 +1,11 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Header } from './components/Header';
+import { PageTitle } from './components/PageTitle';
 import { InputPanel } from './components/InputPanel';
 import { TimelinePanel } from './components/TimelinePanel';
 import { parseProtocol } from './services/geminiService';
-import type { ProtocolEntry, PairedProtocolEntry } from './types';
+import { analyzeTimeline } from './services/analysisService';
+import type { ProtocolEntry, PairedProtocolEntry, AnalysisEntry } from './types';
 
 declare global {
   interface Window {
@@ -43,25 +45,47 @@ const App: React.FC = () => {
   const [inputText, setInputText] = useState<string>('');
   const [pairedData, setPairedData] = useState<PairedProtocolEntry[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
+  const [statusMessage, setStatusMessage] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string>('');
   const [copyButtonText, setCopyButtonText] = useState<string>('Copy Text');
+  const [isInputMinimized, setIsInputMinimized] = useState<boolean>(false);
+  const [isOutputMinimized, setIsOutputMinimized] = useState<boolean>(false);
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const csvFileInputRef = useRef<HTMLInputElement>(null);
   const ocrPageRef = useRef(0);
+  const isStoppingAnalysisRef = useRef<boolean>(false);
+  const analysisOccurredError = useRef(false);
 
   useEffect(() => {
     try {
       const savedInputText = localStorage.getItem('inputText');
       const savedPairedData = localStorage.getItem('pairedData');
       const savedFileName = localStorage.getItem('fileName');
+      const savedInputMinimized = localStorage.getItem('isInputMinimized');
+      const savedOutputMinimized = localStorage.getItem('isOutputMinimized');
 
       if (savedInputText) setInputText(savedInputText);
       if (savedFileName) setFileName(savedFileName);
       if (savedPairedData) setPairedData(JSON.parse(savedPairedData));
+      if (savedInputMinimized) setIsInputMinimized(JSON.parse(savedInputMinimized));
+      if (savedOutputMinimized) setIsOutputMinimized(JSON.parse(savedOutputMinimized));
     } catch (err) {
       console.error("Failed to load state from localStorage:", err);
       localStorage.removeItem('pairedData');
+    }
+
+    const savedTheme = localStorage.getItem('theme');
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+      setTheme('dark');
+    } else {
+      setTheme('light');
     }
   }, []);
 
@@ -70,16 +94,38 @@ const App: React.FC = () => {
       localStorage.setItem('inputText', inputText);
       localStorage.setItem('pairedData', JSON.stringify(pairedData));
       localStorage.setItem('fileName', fileName);
+      localStorage.setItem('isInputMinimized', JSON.stringify(isInputMinimized));
+      localStorage.setItem('isOutputMinimized', JSON.stringify(isOutputMinimized));
     } catch (err) {
       console.error("Failed to save state to localStorage:", err);
     }
-  }, [inputText, pairedData, fileName]);
+  }, [inputText, pairedData, fileName, isInputMinimized, isOutputMinimized]);
+
+  useEffect(() => {
+    const root = window.document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+    try {
+      localStorage.setItem('theme', theme);
+    } catch (err) {
+      console.error("Failed to save theme to localStorage:", err);
+    }
+  }, [theme]);
+  
+  const toggleTheme = () => {
+    setTheme(prevTheme => prevTheme === 'light' ? 'dark' : 'light');
+  };
   
   const handleParse = useCallback(async () => {
     if (!inputText.trim() || isLoading) return;
     setIsLoading(true);
     setError(null);
     setPairedData([]);
+    setAnalysisError(null);
+    setStatusMessage('');
 
     // The maximum number of pages to include in a single API call.
     const CHUNK_SIZE_IN_PAGES = 20;
@@ -151,9 +197,12 @@ const App: React.FC = () => {
     setInputText('');
     setPairedData([]);
     setError(null);
+    setAnalysisError(null);
     setFileName('');
     setLoadingMessage('');
+    setStatusMessage('');
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (csvFileInputRef.current) csvFileInputRef.current.value = '';
     try {
         localStorage.removeItem('inputText');
         localStorage.removeItem('pairedData');
@@ -261,6 +310,222 @@ const App: React.FC = () => {
     }
   };
 
+  const handleCsvUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (event.target) event.target.value = '';
+
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+        setError('Please upload a valid CSV file.');
+        return;
+    }
+
+    handleClear();
+    setIsLoading(true);
+    setLoadingMessage(`Validating CSV file: ${file.name}...`);
+    setFileName(file.name);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const text = (e.target?.result as string)?.replace(/^\uFEFF/, '');
+            if (!text) throw new Error("File is empty or could not be read.");
+
+            const parseCsvRow = (rowString: string): string[] => {
+                const columns: string[] = [];
+                let currentColumn = '';
+                let inQuotes = false;
+                for (let i = 0; i < rowString.length; i++) {
+                    const char = rowString[i];
+                    if (char === '"') {
+                        if (inQuotes && i + 1 < rowString.length && rowString[i + 1] === '"') {
+                            currentColumn += '"';
+                            i++;
+                        } else {
+                            inQuotes = !inQuotes;
+                        }
+                    } else if (char === ',' && !inQuotes) {
+                        columns.push(currentColumn);
+                        currentColumn = '';
+                    } else {
+                        currentColumn += char;
+                    }
+                }
+                columns.push(currentColumn);
+                return columns.map(col => {
+                    if (col.startsWith('"') && col.endsWith('"')) {
+                        return col.slice(1, -1).replace(/""/g, '"');
+                    }
+                    return col;
+                });
+            };
+
+            const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+            if (lines.length < 2) {
+                throw new Error("CSV file must contain a header row and at least one data row.");
+            }
+
+            const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+            const requiredHeaders = ['#', 'Fundstelle', 'Fragesteller', 'Frage', 'Zeuge', 'Antwort', 'Anmerkung'];
+            const validationErrors: string[] = [];
+
+            // 1. Header Validation
+            const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+            if (missingHeaders.length > 0) {
+                validationErrors.push(`Missing required header(s): ${missingHeaders.join(', ')}.`);
+            }
+            const duplicateHeaders = headers.filter((h, i) => headers.indexOf(h) !== i);
+            if (duplicateHeaders.length > 0) {
+                validationErrors.push(`Duplicate header(s) found: ${[...new Set(duplicateHeaders)].join(', ')}.`);
+            }
+
+            // 2. Row Validation
+            const seenIds = new Set<number>();
+            for (let i = 1; i < lines.length; i++) {
+                const lineNumber = i + 1;
+                const values = parseCsvRow(lines[i]);
+
+                if (values.length !== headers.length) {
+                    validationErrors.push(`On line ${lineNumber}: Incorrect number of columns. Expected ${headers.length}, but found ${values.length}.`);
+                    continue; // Skip further checks for this malformed row
+                }
+
+                const idStr = values[headers.indexOf('#')];
+                const id = parseInt(idStr, 10);
+
+                if (isNaN(id) || id <= 0) {
+                    validationErrors.push(`On line ${lineNumber}: Invalid or missing ID. Must be a positive number.`);
+                } else if (seenIds.has(id)) {
+                    validationErrors.push(`On line ${lineNumber}: Duplicate ID '${id}' found.`);
+                } else {
+                    seenIds.add(id);
+                }
+            }
+            
+            if (validationErrors.length > 0) {
+                throw new Error(`CSV Validation Failed:\n- ${validationErrors.join('\n- ')}`);
+            }
+
+            // 3. Parsing (if validation passes)
+            setLoadingMessage('Parsing valid CSV file...');
+            const parsedEntries: PairedProtocolEntry[] = [];
+            for (let i = 1; i < lines.length; i++) {
+                const values = parseCsvRow(lines[i]);
+                const entry: PairedProtocolEntry = {
+                    id: parseInt(values[headers.indexOf('#')], 10),
+                    sourceReference: values[headers.indexOf('Fundstelle')] || '',
+                    questioner: values[headers.indexOf('Fragesteller')] || null,
+                    question: values[headers.indexOf('Frage')] || null,
+                    witness: values[headers.indexOf('Zeuge')] || null,
+                    answer: values[headers.indexOf('Antwort')] || null,
+                    note: values[headers.indexOf('Anmerkung')] || null,
+                };
+                parsedEntries.push(entry);
+            }
+
+            setPairedData(parsedEntries);
+            setError(null);
+
+        } catch (err: any) {
+            console.error("CSV processing failed:", err);
+            setError(`Failed to process CSV: ${err.message || 'An unknown error occurred.'}`);
+            handleClear();
+        } finally {
+            setIsLoading(false);
+            setLoadingMessage('');
+        }
+    };
+
+    reader.onerror = () => {
+        setError('Error reading the file.');
+        setIsLoading(false);
+        setLoadingMessage('');
+    };
+
+    reader.readAsText(file, 'UTF-8');
+  };
+
+  const handleAnalyze = useCallback(async () => {
+    if (pairedData.length === 0 || isAnalyzing || isLoading) return;
+    
+    analysisOccurredError.current = false;
+    isStoppingAnalysisRef.current = false;
+    setIsAnalyzing(true);
+    setAnalysisError(null);
+    setLoadingMessage('');
+    setStatusMessage('');
+    
+    // Clear previous analysis results
+    setPairedData(currentData => currentData.map(({ kernaussage, zugeordneteKategorien, begruendung, ...rest }) => rest));
+
+    const dataToAnalyze = pairedData.filter(entry => entry.note === null);
+
+    if (dataToAnalyze.length === 0) {
+        setIsAnalyzing(false);
+        setStatusMessage('No question/answer pairs to analyze.');
+        setTimeout(() => setStatusMessage(''), 4000);
+        return;
+    }
+
+    const ANALYSIS_CHUNK_SIZE = 8;
+    const chunks: PairedProtocolEntry[][] = [];
+    for (let i = 0; i < dataToAnalyze.length; i += ANALYSIS_CHUNK_SIZE) {
+      chunks.push(dataToAnalyze.slice(i, i + ANALYSIS_CHUNK_SIZE));
+    }
+    const totalChunks = chunks.length;
+    let currentChunkIndex = 0;
+
+    try {
+      for (let i = 0; i < totalChunks; i++) {
+        currentChunkIndex = i;
+        if (isStoppingAnalysisRef.current) {
+          break;
+        }
+
+        const chunk = chunks[i];
+        setLoadingMessage(`Analyzing chunk ${i + 1} of ${totalChunks}...`);
+
+        const chunkResult = await analyzeTimeline(chunk);
+
+        setPairedData(currentPairedData => {
+            const analysisMap = new Map(chunkResult.map(item => [item.id, item]));
+            return currentPairedData.map(entry => {
+                const analysisData = analysisMap.get(entry.id);
+                if (analysisData) {
+                    return { ...entry, ...analysisData };
+                }
+                return entry;
+            });
+        });
+      }
+
+    } catch (err: any) {
+      analysisOccurredError.current = true;
+      const chunkNumber = currentChunkIndex + 1;
+      const errorMessage = `An error occurred while analyzing chunk ${chunkNumber} of ${totalChunks}. The results shown are partial. \n\nDetails: ${err.message || 'An unknown error occurred.'}`;
+      setAnalysisError(errorMessage);
+    } finally {
+      setIsAnalyzing(false);
+      setLoadingMessage('');
+      
+      let finalMessage = '';
+      if (isStoppingAnalysisRef.current) {
+        finalMessage = 'Analysis stopped by user.';
+      } else if (!analysisOccurredError.current) {
+        finalMessage = 'Analysis complete.';
+      }
+      setStatusMessage(finalMessage);
+      
+      isStoppingAnalysisRef.current = false;
+      setTimeout(() => setStatusMessage(''), 4000);
+    }
+  }, [pairedData, isAnalyzing, isLoading]);
+  
+  const handleStopAnalysis = () => {
+    isStoppingAnalysisRef.current = true;
+  };
+
   const handleCopyText = () => {
     if (!inputText || !navigator.clipboard) return;
     navigator.clipboard.writeText(inputText).then(() => {
@@ -270,95 +535,121 @@ const App: React.FC = () => {
       setError("Could not copy text to clipboard.");
     });
   };
+  
+  const handleExportCSV = useCallback(() => {
+    if (pairedData.length === 0) {
+      alert("There is no data to export.");
+      return;
+    }
 
-  const handleExportXLSX = () => {
-    const dataForExport = pairedData.map(entry => ({
-      '#': entry.id,
-      'Fundstelle': entry.sourceReference,
-      'Fragesteller': entry.questioner || '',
-      'Frage': entry.question || '',
-      'Zeuge': entry.witness || '',
-      'Antwort': entry.answer || '',
-      'Anmerkung': entry.note || '',
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(dataForExport);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Timeline");
-
-    worksheet['!cols'] = [
-      { wch: 5 }, { wch: 12 }, { wch: 25 }, { wch: 50 },
-      { wch: 25 }, { wch: 50 }, { wch: 50 },
-    ];
-    
-    const exportFileName = (fileName ? fileName.replace(/\.pdf$/i, '') : 'protocol') + '_export.xlsx';
-    XLSX.writeFile(workbook, exportFileName);
-  };
-
-  const handleExportCSV = () => {
-    const headers = ['#', 'Fundstelle', 'Fragesteller', 'Frage', 'Zeuge', 'Antwort', 'Anmerkung'];
-    
-    const escapeCsvCell = (cellData: string | number | null) => {
+    const formatCsvCell = (cellData: string | null | undefined): string => {
       if (cellData === null || cellData === undefined) return '';
-      const stringData = String(cellData);
-      if (stringData.includes(',') || stringData.includes('\n') || stringData.includes('"')) {
-        const escapedData = stringData.replace(/"/g, '""');
-        return `"${escapedData}"`;
+      const cellString = String(cellData);
+      if (cellString.includes(',') || cellString.includes('"') || cellString.includes('\n')) {
+        const escapedString = cellString.replace(/"/g, '""');
+        return `"${escapedString}"`;
       }
-      return stringData;
+      return cellString;
     };
 
-    const csvRows = [
-      headers.join(','),
-      ...pairedData.map(entry => [
-        entry.id, entry.sourceReference, entry.questioner,
-        entry.question, entry.witness, entry.answer, entry.note
-      ].map(escapeCsvCell).join(','))
-    ];
+    const hasAnalysisData = pairedData.some(entry => entry.kernaussage || entry.zugeordneteKategorien || entry.begruendung);
 
-    const csvString = csvRows.join('\r\n');
+    const headers = ['#', 'Fundstelle', 'Fragesteller', 'Frage', 'Zeuge', 'Antwort', 'Anmerkung'];
+    if (hasAnalysisData) {
+      headers.push('Kernaussage', 'Zugeordnete Kategorie(n)', 'Begründung');
+    }
+
+    const csvRows = [headers.join(',')];
+    let qaPairCounter = 0;
+    
+    pairedData.forEach(entry => {
+      let rowData: (string | null | undefined)[] = [];
+
+      if (entry.note) {
+          rowData = [
+              '', // No number for notes
+              entry.sourceReference,
+              '', '', '', '', // Empty Q/A fields
+              entry.note,
+          ];
+          if (hasAnalysisData) {
+              rowData.push('', '', '');
+          }
+      } else {
+          qaPairCounter++;
+          rowData = [
+              String(qaPairCounter),
+              entry.sourceReference,
+              entry.questioner,
+              entry.question,
+              entry.witness,
+              entry.answer,
+              '', // Empty note field
+          ];
+          if (hasAnalysisData) {
+              rowData.push(entry.kernaussage || '', entry.zugeordneteKategorien || '', entry.begruendung || '');
+          }
+      }
+      csvRows.push(rowData.map(formatCsvCell).join(','));
+    });
+
+    const csvString = csvRows.join('\n');
     const blob = new Blob([`\uFEFF${csvString}`], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
-    const exportFileName = (fileName ? fileName.replace(/\.pdf$/i, '') : 'protocol') + '_export.csv';
     link.setAttribute('href', url);
+    const exportFileName = fileName ? `${fileName.replace(/\.[^/.]+$/, "")}_export.csv` : 'protocol_export.csv';
     link.setAttribute('download', exportFileName);
-    link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
+  }, [pairedData, fileName]);
 
   return (
-    <div className="min-h-screen text-black bg-white">
-      <Header />
-      <main className="container mx-auto px-4 lg:px-8 py-8">
+    <div className="min-h-screen text-[var(--color-on-background)] bg-[var(--color-background)]">
+      <Header theme={theme} onToggleTheme={toggleTheme} />
+      <main className="container mx-auto px-4 lg:px-8 py-8 pt-28">
+        <PageTitle />
         <div className="flex flex-col gap-16 items-start">
-          <InputPanel
-            inputText={inputText}
-            setInputText={setInputText}
-            fileName={fileName}
-            setFileName={setFileName}
-            isLoading={isLoading}
-            loadingMessage={loadingMessage}
-            error={error}
-            fileInputRef={fileInputRef}
-            copyButtonText={copyButtonText}
-            onFileChange={handleFileChange}
-            onParse={handleParse}
-            onCopyText={handleCopyText}
-            onClear={handleClear}
-          />
-          <TimelinePanel
-            pairedData={pairedData}
-            isLoading={isLoading}
-            onExportXLSX={handleExportXLSX}
-            onExportCSV={handleExportCSV}
-          />
+          <section id="input" className="w-full scroll-mt-24">
+            <InputPanel
+              inputText={inputText}
+              setInputText={setInputText}
+              fileName={fileName}
+              setFileName={setFileName}
+              isLoading={isLoading}
+              loadingMessage={loadingMessage}
+              error={error}
+              fileInputRef={fileInputRef}
+              copyButtonText={copyButtonText}
+              onFileChange={handleFileChange}
+              onParse={handleParse}
+              onCopyText={handleCopyText}
+              onClear={handleClear}
+              isMinimized={isInputMinimized}
+              onToggleMinimize={() => setIsInputMinimized(prev => !prev)}
+            />
+          </section>
+          <section id="output" className="w-full scroll-mt-24">
+            <TimelinePanel
+              pairedData={pairedData}
+              isLoading={isLoading}
+              isAnalyzing={isAnalyzing}
+              loadingMessage={loadingMessage}
+              statusMessage={statusMessage}
+              analysisError={analysisError}
+              onUploadCSV={handleCsvUpload}
+              csvFileInputRef={csvFileInputRef}
+              onAnalyze={handleAnalyze}
+              onStopAnalysis={handleStopAnalysis}
+              onExportCSV={handleExportCSV}
+              isMinimized={isOutputMinimized}
+              onToggleMinimize={() => setIsOutputMinimized(prev => !prev)}
+            />
+          </section>
         </div>
       </main>
-      <footer className="text-center py-6 text-black/70 text-sm">
+      <footer className="text-center py-6 text-[var(--color-on-surface-variant)] text-sm">
         <p>Powered by Google Gemini & React</p>
       </footer>
     </div>

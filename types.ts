@@ -1,3 +1,4 @@
+
 export interface ProtocolEntry {
   id: number;
   speaker: string;
@@ -15,4 +16,16 @@ export interface PairedProtocolEntry {
   witness: string | null;
   answer: string | null;
   note: string | null;
+  // Analysis fields
+  kernaussage?: string;
+  zugeordneteKategorien?: string;
+  begruendung?: string;
+}
+
+export interface AnalysisEntry {
+  // FIX: Changed id from string to number for type consistency.
+  id: number;
+  kernaussage: string;
+  zugeordneteKategorien: string;
+  begruendung: string;
 }
