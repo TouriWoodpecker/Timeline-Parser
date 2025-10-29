@@ -1,13 +1,12 @@
 import React from 'react';
-import { LoadingIndicator } from './LoadingSpinner';
-import { ErrorMessage } from './ErrorMessage';
 import type { KeyInsights } from '../types';
 import { renderMarkdown } from '../utils/markdown';
+// FIX: Import types for custom element definitions.
+import '../types';
 
 interface InsightsPanelProps {
   insights: KeyInsights | null;
   isLoading: boolean;
-  error: string | null;
   isMinimized: boolean;
   onToggleMinimize: () => void;
 }
@@ -15,12 +14,11 @@ interface InsightsPanelProps {
 export const InsightsPanel: React.FC<InsightsPanelProps> = ({
   insights,
   isLoading,
-  error,
   isMinimized,
   onToggleMinimize,
 }) => {
 
-  const hasInsights = !isLoading && !error && insights;
+  const hasInsights = !isLoading && insights;
 
   const handleCopy = () => {
     if (!insights || !navigator.clipboard) return;
@@ -39,12 +37,6 @@ export const InsightsPanel: React.FC<InsightsPanelProps> = ({
 
 
   const renderContent = () => {
-    if (isLoading) {
-      return <LoadingIndicator message="Finding key insights..." />;
-    }
-    if (error) {
-      return <ErrorMessage message={error} />;
-    }
     if (!insights) {
       return (
         <div style={{
@@ -55,6 +47,7 @@ export const InsightsPanel: React.FC<InsightsPanelProps> = ({
         }}>
           <span className="material-symbols-outlined" style={{fontSize: '48px', color: 'var(--md-sys-color-surface-variant)'}}>auto_awesome</span>
           <h3 className="md-typescale-title-medium" style={{marginTop: '16px', color: 'var(--md-sys-color-on-surface-variant)'}}>AI-Powered Insights</h3>
+          <p className="md-typescale-body-medium" style={{color: 'var(--md-sys-color-on-surface-variant)'}}>Click "Find Key Insights" in the timeline panel to generate a summary.</p>
         </div>
       );
     }
@@ -96,24 +89,29 @@ export const InsightsPanel: React.FC<InsightsPanelProps> = ({
     <div className={`card ${isMinimized ? 'card--filled' : 'card--elevated'}`}>
         <div className="panel-header" onClick={onToggleMinimize} style={{ cursor: 'pointer' }}>
             <div className="panel-header-title">
-                <h2 className="md-typescale-title-large" style={{ margin: 0 }}>Key Insights</h2>
+                <h2 className="md-typescale-title-large" style={{ margin: 0 }}>Insights</h2>
             </div>
-            <md-icon-button aria-label={isMinimized ? 'Expand panel' : 'Collapse panel'}>
-                <span className="material-symbols-outlined">{isMinimized ? 'expand_more' : 'expand_less'}</span>
-            </md-icon-button>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+                {hasInsights && (
+                    <md-icon-button
+                        onClick={(e: React.MouseEvent) => {
+                            e.stopPropagation();
+                            handleCopy();
+                        }}
+                        title="Copy Insights"
+                    >
+                        <span className="material-symbols-outlined">content_copy</span>
+                    </md-icon-button>
+                )}
+                <md-icon-button aria-label={isMinimized ? 'Expand panel' : 'Collapse panel'}>
+                    <span className="material-symbols-outlined">{isMinimized ? 'expand_more' : 'expand_less'}</span>
+                </md-icon-button>
+            </div>
         </div>
         <div className="panel-content">
           {!isMinimized && (
             <>
               {renderContent()}
-              {hasInsights && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px', borderTop: '1px solid var(--md-sys-color-outline-variant)', paddingTop: '16px'}}>
-                    <md-text-button onClick={handleCopy}>
-                        <span className="material-symbols-outlined" slot="icon">content_copy</span>
-                        Copy Insights
-                    </md-text-button>
-                </div>
-              )}
             </>
           )}
         </div>

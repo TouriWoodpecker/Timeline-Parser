@@ -1,5 +1,7 @@
 import React, { useEffect } from 'react';
 import useLocalStorage from '../hooks/useLocalStorage';
+// FIX: Import types for custom element definitions.
+import '../types';
 
 export const ThemeToggleButton: React.FC = () => {
   const [theme, setTheme] = useLocalStorage<'light' | 'dark'>('theme', 'light');

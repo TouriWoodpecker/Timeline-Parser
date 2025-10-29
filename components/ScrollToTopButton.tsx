@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+// FIX: Import types for custom element definitions.
+import '../types';
 
 export const ScrollToTopButton: React.FC = () => {
   const [isVisible, setIsVisible] = useState(false);

@@ -11,6 +11,7 @@ declare namespace Tesseract {
   }
   function createWorker(lang: string): Promise<Worker>;
 }
+declare const Papa: any;
 
 
 /**
@@ -127,73 +128,6 @@ export async function extractTextFromPdf(file: File, setLoadingMessage: (msg: st
     }
 }
 
-
-/**
- * A robust CSV parser that handles quoted fields containing newlines and commas.
- * @param csvText The raw CSV string.
- * @returns An array of objects representing the parsed data.
- */
-function parseCsv(csvText: string): { [key: string]: string }[] {
-    const lines = csvText.replace(/\r\n/g, '\n').split('\n');
-    if (lines.length === 0) return [];
-    
-    const headers = lines[0].split(',').map(h => h.trim());
-    const rows = [];
-    
-    let currentRow: string[] = [];
-    let currentField = '';
-    let inQuotedField = false;
-
-    for (let i = 1; i < lines.length; i++) {
-        const line = lines[i];
-        if (!line.trim() && i === lines.length - 1) continue; // Skip trailing empty line
-
-        for (let j = 0; j < line.length; j++) {
-            const char = line[j];
-            
-            if (inQuotedField) {
-                if (char === '"') {
-                    if (j < line.length - 1 && line[j + 1] === '"') {
-                        currentField += '"';
-                        j++; // Skip next quote
-                    } else {
-                        inQuotedField = false;
-                    }
-                } else {
-                    currentField += char;
-                }
-            } else {
-                if (char === '"') {
-                    inQuotedField = true;
-                } else if (char === ',') {
-                    currentRow.push(currentField);
-                    currentField = '';
-                } else {
-                    currentField += char;
-                }
-            }
-        }
-        
-        if (!inQuotedField) {
-            currentRow.push(currentField);
-            rows.push(currentRow);
-            currentRow = [];
-            currentField = '';
-        } else {
-             currentField += '\n'; // Add newline for multiline fields
-        }
-    }
-    
-    return rows.map(row => {
-        const rowObject: { [key: string]: string } = {};
-        headers.forEach((header, index) => {
-            rowObject[header] = row[index] || '';
-        });
-        return rowObject;
-    });
-}
-
-
 const REQUIRED_HEADERS = ['#', 'Fragesteller', 'Frage', 'Zeuge', 'Antwort'];
 const HEADER_ALIASES: { [key: string]: string[] } = {
   id: ['#', 'id'],
@@ -232,7 +166,7 @@ function validateAndMapData(data: { [key: string]: any }[]): { data: ParsedEntry
     const mappedData = data.map(row => {
         idCounter++;
         
-        const trimmedRow: {[key: string]: any} = {};
+        const trimmedRow: {[key:string]: any} = {};
         for(const key in row) {
             trimmedRow[key.trim().toLowerCase()] = row[key];
         }
@@ -279,31 +213,47 @@ function validateAndMapData(data: { [key: string]: any }[]): { data: ParsedEntry
 
 
 /**
- * Processes a CSV file.
+ * Processes a CSV file using PapaParse for robustness.
  * @param file The CSV file.
  * @returns A promise resolving to an object with data and warnings.
  */
 export async function processCsvFile(file: File): Promise<{ data: ParsedEntry[], warnings: string[] }> {
     return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            try {
-                const csvText = event.target?.result as string;
-                if (!csvText) {
-                    return reject(new Error("File is empty."));
+        
+        // PapaParse is now globally available
+        Papa.parse(file, {
+            header: true, // Use the first row as headers
+            skipEmptyLines: true, // Ignore empty lines
+            delimitersToGuess: [',', ';', '\t'], // Help auto-detection by providing common delimiters.
+            
+            complete: (results: any) => {
+                // Errors during parsing?
+                if (results.errors && results.errors.length > 0) {
+                    console.error("PapaParse Errors:", results.errors);
+                    // Take the first error to display to the user
+                    return reject(new Error(`CSV parsing failed: ${results.errors[0].message}`));
                 }
-                const parsedData = parseCsv(csvText);
+                
+                const parsedData = results.data as { [key: string]: string }[];
+                
                 if (parsedData.length === 0) {
                    return reject(new Error("The CSV file is empty or could not be parsed. Check formatting."));
                 }
-                const validationResult = validateAndMapData(parsedData);
-                resolve(validationResult);
-            } catch (error) {
-                reject(error);
+                
+                try {
+                    // The validation and mapping function remains the same
+                    const validationResult = validateAndMapData(parsedData);
+                    resolve(validationResult);
+                } catch (validationError: any) {
+                    // Error while mapping the data
+                    reject(validationError);
+                }
+            },
+            error: (error: any) => {
+                // Error reading the file
+                reject(new Error(`Failed to read the CSV file: ${error.message}`));
             }
-        };
-        reader.onerror = () => reject(new Error('Failed to read the CSV file.'));
-        reader.readAsText(file, 'utf-8');
+        });
     });
 }
 
@@ -469,4 +419,22 @@ export function exportToXlsx(data: ParsedEntry[], fileName: string): void {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Protocol Timeline');
     XLSX.writeFile(wb, fileName);
+}
+
+/**
+ * Triggers a browser download for any text-based content.
+ * @param content The string content to download.
+ * @param fileName The desired name of the file.
+ * @param mimeType The MIME type of the content (e.g., 'application/json').
+ */
+export function exportTextFile(content: string, fileName: string, mimeType: string): void {
+    const blob = new Blob([content], { type: mimeType });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', fileName);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }

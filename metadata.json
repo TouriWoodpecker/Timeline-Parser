@@ -1,5 +1,5 @@
 {
-  "name": "Protocol Parser",
-  "description": "An application to parse certain protocols using AI. Upload the text of a protocol, and the app will intelligently structure it into a table, identifying speakers, their roles, and the content of their statements.",
+  "name": "IPEA",
+  "description": "IPEA: Insights, Parsing, Extracting, Analyzing. An application to parse, analyze and gain insights from protocols.",
   "requestFramePermissions": []
 }

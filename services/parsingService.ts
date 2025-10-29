@@ -1,179 +1,133 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ParsedEntry } from "../types";
+import { callGenerativeAIWithCorrection } from "./aiUtils";
 
 // Initialize the Google AI client
 let ai: GoogleGenAI;
-if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable not set. Womit wollen Sie bezahlen? Mit Luft?");
-}
 try {
   ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
 } catch (error) {
-  console.error("Failed to initialize GoogleGenAI.", error);
-  throw new Error("Failed to initialize GoogleGenAI.");
+  console.error("Failed to initialize GoogleGenAI. Make sure API_KEY is set in environment variables.", error);
 }
 
-// The schema the AI MUST adhere to.
+// Define the schema for the AI's response, which is an array of structured objects.
 const parsingSchema = {
-    type: Type.ARRAY,
-    items: {
-        type: Type.OBJECT,
-        description: "Ein einzelner Eintrag: Entweder ein Q&A-Paar oder eine prozedurale Notiz.",
-        properties: {
-            sourceReference: {
-                type: Type.STRING,
-                description: "Die Fundstelle, die aus den Parametern generiert wird (z.B. 'WP80/06').",
-            },
-            questioner: {
-                type: Type.STRING,
-                description: "Der Fragesteller (z.B. 'Abg. Müller (SPD)'). Null, wenn Notiz.",
-            },
-            question: {
-                type: Type.STRING,
-                description: "Der volle Text der Frage. Null, wenn Notiz.",
-            },
-            witness: {
-                type: Type.STRING,
-                description: "Der Antwortende (z.B. 'Zeuge Dr. Schmidt'). Null, wenn Notiz.",
-            },
-            answer: {
-                type: Type.STRING,
-                description: "Der volle Text der Antwort. Null, wenn Notiz.",
-            },
-            note: {
-                type: Type.STRING,
-                description: "Eine prozedurale Notiz (z.B. '(Beifall bei der CDU)'). Wenn dies gesetzt ist, sind die Q&A-Felder null.",
-            },
-        },
-        required: ["sourceReference"], // AI must at least set the source reference.
+  type: Type.ARRAY,
+  description: "An array of structured protocol entries, each representing a question/answer pair or a procedural note.",
+  items: {
+    type: Type.OBJECT,
+    properties: {
+      questioner: {
+        type: Type.STRING,
+        description: "The name of the person asking the question (e.g., 'Dr. Heiko Mass'). Null if it's a note or a statement without a preceding question.",
+      },
+      question: {
+        type: Type.STRING,
+        description: "The full text of the question being asked. Null if it's a note.",
+      },
+      witness: {
+        type: Type.STRING,
+        description: "The name of the person answering the question (e.g., 'Zeuge Christian Pegel'). Null if it's a note.",
+      },
+      answer: {
+        type: Type.STRING,
+        description: "The full text of the answer. If a witness makes a statement without a direct question, this field should contain that statement, and the 'question' and 'questioner' fields should be null. Null if it's a note.",
+      },
+      note: {
+        type: Type.STRING,
+        description: "Procedural notes, interruptions, or comments from the chairperson (e.g., 'Vorsitzender: Herr Abgeordneter, kommen Sie bitte zur Frage.'). Null if it's a Q&A pair.",
+      },
     },
+  },
 };
 
 /**
- * Baut den Prompt für die KI, inklusive der Metadaten.
+ * Parses a chunk of text from a protocol page using a generative AI model.
+ * @param textChunk The raw text from a single page.
+ * @param protocolId The ID of the protocol (e.g., 'WP79').
+ * @param pageNumber The page number of the text chunk.
+ * @param startId The starting ID for the parsed entries on this page.
+ * @returns A promise that resolves to an array of ParsedEntry objects.
  */
-function buildPrompt(textChunk: string, protocolId: string, pageNumber: number): string {
-    // Sorgt für "06" statt "6"
-    const paddedPageNumber = String(pageNumber).padStart(2, '0');
-    const sourceRef = `${protocolId}/${paddedPageNumber}`;
+export async function parseProtocolChunk(
+  textChunk: string,
+  protocolId: string,
+  pageNumber: number,
+  startId: number
+): Promise<ParsedEntry[]> {
+  if (!ai) {
+    throw new Error("GoogleGenAI client not initialized. Check API key configuration.");
+  }
 
-    return `
-    Du bist ein Experte im Parsen von deutschen parlamentarischen Protokollen.
-    Deine Aufgabe ist es, den Text in eine Reihe von Einträgen zu zerlegen:
-    1.  **Frage-Antwort-Paare**: Ein Eintrag, der eine Frage UND die darauf folgende Antwort enthält.
-    2.  **Notizen**: Ein Eintrag für alles andere (Zwischenrufe, Vorsitzenden-Anweisungen, Beifall).
+  const prompt = `
+    **ROLE & GOAL**
+    You are a specialized AI assistant for parsing German parliamentary committee protocols. Your task is to analyze a raw text chunk from a single page of a protocol and structure it into a sequence of question-and-answer (Q&A) pairs or procedural notes. You must accurately identify speakers, their roles, and pair up questions with their corresponding answers.
 
-    REGELN:
-    -   **Fundstelle (sourceReference):** Verwende für JEDEN Eintrag, den du in diesem Chunk findest, die Fundstelle: "${sourceRef}".
-    -   **JSON-Gültigkeit:** Deine Antwort MUSS ein valides JSON-Array sein. ALLES andere wird ignoriert.
-    -   **Genauigkeit:** Extrahiere den Text wörtlich.
-    -   **Logik:** Wenn ein Sprecher (z.B. "Vorsitzender") eine prozedurale Ansage macht, ist das eine "note". Wenn er eine Frage stellt, ist es ein "questioner".
-    -   **WICHTIGSTE REGEL (NEU):** Wenn der Text-Chunk KEINEN relevanten Inhalt enthält (d.h. keine Sprecherzeilen, keine Klammer-Notizen, sondern nur Metadaten, Kopf-/Fußzeilen, Seitenzahlen oder Artefakte), dann und NUR dann gib ein **leeres Array** zurück: \`[]\`. Gib NICHTS anderes zurück, nur \`[]\`.
+    **CONTEXT**
+    - The protocol is from a German parliamentary committee, likely an investigative committee ('Untersuchungsausschuss').
+    - The text is raw OCR output and may contain errors or formatting artifacts.
+    - Speakers are typically identified by their name (e.g., 'Dr. Heiko Mass', 'Christian Pegel') and sometimes their role (e.g., 'Vorsitzender', 'Zeuge').
+    - The flow is a dialogue, primarily questions from committee members ('Abgeordneter') to a witness ('Zeuge'). The chairperson ('Vorsitzender') often interjects with procedural notes.
 
-    BEISPIEL 1 (Q&A):
-    Text: "Abg. Müller (SPD): Waren Sie am 15. am Standort? Zeuge Dr. Schmidt: Ja, das war ich."
-    JSON-Ausgabe (als Teil des Arrays):
-    {
-        "sourceReference": "${sourceRef}",
-        "questioner": "Abg. Müller (SPD)",
-        "question": "Waren Sie am 15. am Standort?",
-        "witness": "Zeuge Dr. Schmidt",
-        "answer": "Ja, das war ich.",
-        "note": null
-    }
+    **INPUT & PROCESSING RULES**
+    You will receive a single chunk of text from one page. Follow these rules meticulously:
 
-    BEISPIEL 2 (Notiz):
-    Text: "(Beifall bei der SPD-Fraktion)"
-    JSON-Ausgabe (als Teil des Arrays):
-    {
-        "sourceReference": "${sourceRef}",
-        "questioner": null,
-        "question": null,
-        "witness": null,
-        "answer": null,
-        "note": "(Beifall bei der SPD-Fraktion)"
-    }
+    1.  **Identify Q&A Pairs:** A standard entry is a question followed by its answer.
+        - The 'questioner' is the person asking the question.
+        - The 'question' is the text of their question.
+        - The 'witness' is the person who replies.
+        - The 'answer' is the text of their reply.
+        - Combine multi-paragraph questions/answers from the same speaker into a single field.
 
-    BEISPIEL 3 (Vorsitzender als Notiz):
-    Text: "Vorsitzender: Ich weise den Zeugen auf die Wahrheitspflicht hin."
-    JSON-Ausgabe (als Teil des Arrays):
-    {
-        "sourceReference": "${sourceRef}",
-        "questioner": null,
-        "question": null,
-        "witness": null,
-        "answer": null,
-        "note": "Vorsitzender: Ich weise den Zeugen auf die Wahrheitspflicht hin."
-    }
+    2.  **Handle Standalone Statements:** If a witness provides a lengthy statement without a direct preceding question on the *same page*, capture it.
+        - Set 'witness' to the speaker's name.
+        - Set 'answer' to their full statement.
+        - Set 'questioner' and 'question' to \`null\`.
 
-    ---
-    PARSE JETZT DEN FOLGENDEN TEXT CHUNK (Fundstelle ${sourceRef}):
+    3.  **Identify Procedural Notes:** Comments from the chairperson ('Vorsitzender'), interruptions, or general procedural text are considered notes.
+        - Capture the entire note text in the 'note' field.
+        - Set all other fields ('questioner', 'question', 'witness', 'answer') to \`null\`.
+        - Example note: "Vorsitzender: Herr Abgeordneter, kommen Sie bitte zur Frage."
+
+    4.  **Speaker Identification:**
+        - Extract the full name of the speaker (e.g., 'Dr. Heiko Mass', not just 'Mass').
+        - Ignore titles like 'Abgeordneter' or 'Zeuge' in the name fields, but use them to determine who is the questioner and who is the witness.
+
+    5.  **Continuity:** A question might be at the end of the text chunk, with the answer presumably on the next page. Or, an answer might be at the start, continuing from the previous page. Your scope is ONLY the text provided.
+        - If a question is at the end without an answer in the chunk, create an entry with the 'questioner' and 'question', but set 'witness' and 'answer' to \`null\`.
+        - If an answer is at the beginning without a question in the chunk, create an entry with the 'witness' and 'answer', but set 'questioner' and 'question' to \`null\`.
+
+    6.  **Data Cleaning:** Clean up OCR artifacts like page numbers or random headers/footers within the text content. Do not include them in your output. Remove unnecessary line breaks within a single question or answer to create a coherent text block.
+
+    **INPUT TEXT TO PARSE:**
     ---
     ${textChunk}
     ---
+
+    **OUTPUT FORMAT**
+    Your output must be a single, valid JSON array of objects, strictly conforming to the provided schema. Do not include any text, explanations, or markdown formatting outside of the JSON array.
     `;
-}
-/**
- * Parses a single text chunk belonging to ONE page.
- *
- * @param textChunk The raw text content (e.g., from one page).
- * @param protocolId The ID of the protocol (e.g., "WP80").
- * @param pageNumber The page number (e.g., 6).
- * @param startIndex The ID counter to ensure unique IDs across all chunks.
- * @returns A promise that resolves to an array of parsed entries.
- */
-export async function parseProtocolChunk(
-    textChunk: string,
-    protocolId: string,
-    pageNumber: number,
-    startIndex: number
-): Promise<ParsedEntry[]> {
 
-    if (!textChunk.trim()) {
-        console.log("Text chunk is empty, skipping.");
-        return [];
-    }
+  try {
+    // FIX: Updated deprecated model name from gemini-1.5-pro to gemini-2.5-pro.
+    const results = await callGenerativeAIWithCorrection(ai, 'gemini-2.5-pro', prompt, {
+      responseMimeType: 'application/json',
+      responseSchema: parsingSchema,
+    });
 
-    const prompt = buildPrompt(textChunk, protocolId, pageNumber);
-
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-pro', // Use Pro. Flash is not suitable for this.
-            contents: prompt,
-            config: {
-                responseMimeType: 'application/json',
-                responseSchema: parsingSchema,
-            },
-        });
-
-        const responseText = response.text.trim();
-        
-        // This shouldn't be necessary thanks to responseMimeType, but we trust no one.
-        const cleanedJsonString = responseText.replace(/^```json\s*|```\s*$/g, '');
-
-        // The AI sometimes returns a single object instead of an array with one object.
-        const parsedResult = JSON.parse(cleanedJsonString);
-        const resultArray = Array.isArray(parsedResult) ? parsedResult : [parsedResult];
-
-        // Map to our final interface and assign continuous IDs.
-        return resultArray.map((item: any, index: number) => ({
-            id: startIndex + index,
-            sourceReference: item.sourceReference || `${protocolId}/${String(pageNumber).padStart(2, '0')}`,
-            questioner: item.questioner || null,
-            question: item.question || null,
-            witness: item.witness || null,
-            answer: item.answer || null,
-            note: item.note || null,
-        }));
-
-    } catch (error) {
-        console.error(`--- ERROR ON PARSING (Chunk: ${protocolId}/${pageNumber}) ---`);
-        console.error("Error message:", error instanceof Error ? error.message : String(error));
-        console.error("--- Text chunk that caused the error (shortened) ---");
-        console.error(textChunk.substring(0, 500) + "...");
-        console.error("--- END OF ERROR ---");
-
-        // We throw the error instead of trying to "fix" it.
-        throw new Error(`Failed to parse protocol chunk ${protocolId}/${pageNumber}: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    // Post-process to add IDs and source references
+    return results.map((item: any, index: number) => ({
+      ...item,
+      id: startId + index,
+      sourceReference: `${protocolId}, S. ${pageNumber}`,
+      questioner: item.questioner || null,
+      question: item.question || null,
+      witness: item.witness || null,
+      answer: item.answer || null,
+      note: item.note || null,
+    }));
+  } catch (error) {
+    console.error(`Error parsing chunk for page ${pageNumber}:`, error);
+    throw new Error(`Failed to parse page ${pageNumber}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }

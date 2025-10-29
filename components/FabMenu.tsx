@@ -1,7 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import useLocalStorage from '../hooks/useLocalStorage';
+// FIX: Import types for custom element definitions.
+import '../types';
 
-export const FabMenu: React.FC = () => {
+interface FabMenuProps {
+    view: 'app' | 'toolbox';
+    onToggleView: () => void;
+}
+
+export const FabMenu: React.FC<FabMenuProps> = ({ view, onToggleView }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [theme, setTheme] = useLocalStorage<'light' | 'dark'>('theme', 'light');
   const menuRef = useRef<HTMLDivElement>(null);
@@ -43,10 +50,18 @@ export const FabMenu: React.FC = () => {
     setTheme(prevTheme => (prevTheme === 'light' ? 'dark' : 'light'));
     setIsOpen(false);
   };
+  
+  const handleToggleView = () => {
+    onToggleView();
+    setIsOpen(false);
+  };
 
   const isDark = theme === 'dark';
   const themeLabel = isDark ? 'Light Mode' : 'Dark Mode';
   const themeIcon = isDark ? 'light_mode' : 'dark_mode';
+
+  const viewLabel = view === 'app' ? 'Switch to IPEA Toolbox' : 'Switch to Protocol Parser';
+  const viewIcon = view === 'app' ? 'construction' : 'dynamic_feed';
 
   const containerStyle: React.CSSProperties = {
     position: 'fixed',
@@ -70,6 +85,9 @@ export const FabMenu: React.FC = () => {
     <div style={containerStyle} ref={menuRef}>
         {isOpen && (
             <div style={menuItemsContainerStyle}>
+                <md-fab size="small" aria-label={viewLabel} onClick={handleToggleView}>
+                    <span className="material-symbols-outlined" slot="icon">{viewIcon}</span>
+                </md-fab>
                 <md-fab size="small" aria-label={themeLabel} onClick={toggleTheme}>
                     <span className="material-symbols-outlined" slot="icon">{themeIcon}</span>
                 </md-fab>

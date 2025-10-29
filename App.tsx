@@ -16,8 +16,18 @@ import { TimelinePanel } from './components/TimelinePanel';
 import { InsightsPanel } from './components/InsightsPanel';
 import { Footer } from './components/Footer';
 import { FabMenu } from './components/FabMenu';
+import { Toolbox } from './Toolbox';
+import { LandingPage } from './components/toolbox/LandingPage';
+
+type View = 'app' | 'toolbox';
+type ToolboxView = 'landing' | 'tools';
 
 function App() {
+  // --- View State --- //
+  const [view, setView] = useState<View>('toolbox');
+  const [toolboxView, setToolboxView] = useState<ToolboxView>('landing');
+  const [activeToolboxTab, setActiveToolboxTab] = useState(2); // Home is default
+  
   // Input and file state
   const [inputText, setInputText] = useState('');
   const [fileName, setFileName] = useState('');
@@ -32,25 +42,25 @@ function App() {
   const [isParsing, setIsParsing] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isFindingInsights, setIsFindingInsights] = useState(false);
+  const [isToolboxLoading, setIsToolboxLoading] = useState(false); // New state for toolbox
   const [loadingMessage, setLoadingMessage] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [insightsError, setInsightsError] = useState<string | null>(null);
   
   // UI state
   const [isInputMinimized, setIsInputMinimized] = useState(true);
   const [isTimelineMinimized, setIsTimelineMinimized] = useState(true);
   const [isInsightsMinimized, setIsInsightsMinimized] = useState(true);
   const [isHeaderVisible, setIsHeaderVisible] = useState(false);
+  const [headerMessage, setHeaderMessage] = useState('');
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
   const stopOperationRef = useRef(false);
-  const pairedDataRef = useRef<ParsedEntry[]>([]);
   const titleRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLElement>(null);
+  const headerMessageTimeoutRef = useRef<number | null>(null);
 
 
   // --- Effects --- //
@@ -61,16 +71,51 @@ function App() {
       },
       { rootMargin: `-${headerRef.current?.offsetHeight || 64}px 0px 0px 0px`, threshold: 0 }
     );
-    if (titleRef.current) {
+    if (titleRef.current && view === 'app') { // Only observe in app view
       observer.observe(titleRef.current);
     }
     return () => observer.disconnect();
-  }, []);
-
-  // Sync state with ref for use in async callbacks
+  }, [view]); // Rerun when view changes
+  
+  // Effect to manage the global header message based on app state
   useEffect(() => {
-    pairedDataRef.current = pairedData;
-  }, [pairedData]);
+    if (headerMessageTimeoutRef.current) {
+        clearTimeout(headerMessageTimeoutRef.current);
+        headerMessageTimeoutRef.current = null;
+    }
+
+    let message = '';
+    let isSticky = false;
+    let isError = false;
+
+    if (loadingMessage) {
+        message = loadingMessage;
+        isSticky = true;
+    } else if (error) {
+        message = `Error: ${error}`;
+        isError = true;
+    } else if (statusMessage) {
+        message = statusMessage;
+    }
+
+    setHeaderMessage(message);
+
+    if (message && !isSticky) {
+        const timeoutDuration = isError ? 6000 : 4000;
+        headerMessageTimeoutRef.current = window.setTimeout(() => {
+            setHeaderMessage('');
+            // Clear the source messages too
+            if(statusMessage) setStatusMessage('');
+            if(error) setError(null);
+        }, timeoutDuration);
+    }
+
+    return () => {
+        if (headerMessageTimeoutRef.current) {
+            clearTimeout(headerMessageTimeoutRef.current);
+        }
+    };
+  }, [loadingMessage, statusMessage, error]);
 
 
   // --- Handlers --- //
@@ -84,10 +129,8 @@ function App() {
     setIsAnalyzing(false);
     setIsFindingInsights(false);
     setLoadingMessage('');
-    setStatusMessage('');
+    setStatusMessage('State cleared.');
     setError(null);
-    setAnalysisError(null);
-    setInsightsError(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (csvFileInputRef.current) csvFileInputRef.current.value = '';
   };
@@ -109,6 +152,7 @@ function App() {
         setInputText('');
       } else {
         setInputText(extractedText);
+        setStatusMessage('Text extraction complete.');
       }
     } catch (e: any) {
       setError(e.message);
@@ -130,7 +174,6 @@ function App() {
     setStatusMessage('');
 
     try {
-        // 1. Find protocol ID using regex, not AI.
         const protocolMatch = inputText.match(/WP_(\d+)\/\d+/);
         if (!protocolMatch) {
             throw new Error("Could not find the protocol ID (e.g., WP_79/1) in the text.");
@@ -138,15 +181,12 @@ function App() {
         const protocolId = `WP${protocolMatch[1]}`;
         setLoadingMessage(`Processing protocol: ${protocolId}...`);
 
-        // 2. Split text by OCR markers.
         const pageChunks = inputText.split(/==Start of OCR for page (\d+)==/);
 
         let allParsedEntries: ParsedEntry[] = [];
         let currentEntryId = 1;
         const totalPages = Math.floor((pageChunks.length - 1) / 2);
 
-        // 3. Iterate through chunks and parse them.
-        // Start at index 1, because index 0 is the text BEFORE the first page marker.
         for (let i = 1; i < pageChunks.length; i += 2) {
             if (stopOperationRef.current) {
                 setStatusMessage('Parsing aborted by user.');
@@ -155,11 +195,10 @@ function App() {
             const pageNumber = parseInt(pageChunks[i], 10);
             let textChunk = pageChunks[i + 1] || '';
 
-            // Remove the "End of Page" marker if it exists.
             textChunk = textChunk.split(/==End of OCR for page \d+==/)[0];
 
             if (!textChunk.trim()) {
-                continue; // Skip empty pages.
+                continue; 
             }
 
             setLoadingMessage(`Parsing page ${pageNumber} of ${totalPages}...`);
@@ -173,13 +212,11 @@ function App() {
                 );
 
                 allParsedEntries.push(...parsedEntries);
-                // Update state incrementally to show results as they come in.
                 setPairedData([...allParsedEntries]);
                 currentEntryId += parsedEntries.length;
 
             } catch (error) {
                 console.error(`Skipping page ${pageNumber} due to a critical parsing error.`);
-                // Update status to inform user about the skipped page.
                 setStatusMessage(prev => `${prev}\nWarning: Page ${pageNumber} could not be parsed and was skipped.`.trim());
             }
         }
@@ -208,16 +245,16 @@ function App() {
             message += `\n\nWarnings:\n- ${warnings.join('\n- ')}`;
         }
         setStatusMessage(message);
-        setAnalysisError(null);
+        setError(null);
     } catch (e: any) {
-        setAnalysisError(`Failed to import CSV: ${e.message}`);
+        setError(`Failed to import CSV: ${e.message}`);
     }
   };
   
   const onAnalyze = useCallback(async () => {
     setIsAnalyzing(true);
     stopOperationRef.current = false;
-    setAnalysisError(null);
+    setError(null);
     setStatusMessage('');
     
     const dataToAnalyze = pairedData.filter(d => d.question && d.answer && !d.kernaussage);
@@ -259,23 +296,28 @@ function App() {
 
   const onStopAnalysis = () => {
     stopOperationRef.current = true;
+    setStatusMessage('Stopping analysis...');
   };
   
   const onAbortOperation = () => {
       stopOperationRef.current = true;
+      setStatusMessage('Aborting operation...');
   };
 
   const onFindInsights = useCallback(async () => {
     setIsFindingInsights(true);
-    setInsightsError(null);
+    setError(null);
     setInsights(null);
+    setLoadingMessage('Finding key insights...');
     try {
       const result = await findKeyInsights(pairedData);
       setInsights(result);
+      setStatusMessage('Key insights generated successfully.');
     } catch (e: any) {
-      setInsightsError(e.message);
+      setError(e.message);
     } finally {
       setIsFindingInsights(false);
+      setLoadingMessage('');
     }
   }, [pairedData]);
 
@@ -288,28 +330,69 @@ function App() {
   const onExportCSV = () => {
       const date = new Date().toISOString().slice(0, 10);
       exportToCsv(pairedData, `protocol-analysis-${date}.csv`);
+      setStatusMessage('Exported to CSV.');
   };
 
   const onExportXLSX = () => {
       const date = new Date().toISOString().slice(0, 10);
       exportToXlsx(pairedData, `protocol-analysis-${date}.xlsx`);
+      setStatusMessage('Exported to XLSX.');
   };
 
-  const isLoading = isExtracting || isParsing;
+  const handleToggleView = () => {
+    if (view === 'app') {
+      setView('toolbox');
+      setToolboxView('landing'); // Always go to landing page first
+      setActiveToolboxTab(2); // Reset to home
+    } else {
+      setView('app');
+    }
+  };
+  
+  const handleSelectModule = (index: number) => {
+      setActiveToolboxTab(index);
+      setToolboxView('tools');
+  };
 
-  return (
-    <>
-      <Header isVisible={isHeaderVisible} ref={headerRef} />
-      <main>
+  const handleToolboxTabSelect = (index: number) => {
+    setActiveToolboxTab(index);
+    setToolboxView('tools');
+  };
+  
+  const handleGoHome = () => {
+    setToolboxView('landing');
+    setActiveToolboxTab(2); // Home is index 2
+  };
+
+  const isLoadingApp = isExtracting || isParsing || isAnalyzing || isFindingInsights;
+  const isHeaderLoading = isLoadingApp || isToolboxLoading;
+
+  const renderCurrentView = () => {
+    if (view === 'toolbox') {
+      if (toolboxView === 'landing') {
+        return <LandingPage onSelectModule={handleSelectModule} />;
+      }
+      return (
+        <Toolbox 
+            activeTab={activeToolboxTab}
+            setLoading={setIsToolboxLoading}
+            setLoadingMessage={setLoadingMessage}
+            setStatusMessage={setStatusMessage}
+            setError={setError}
+        />
+      );
+    }
+
+    // Default to app view
+    return (
+      <>
         <PageTitle ref={titleRef} />
         <div className="panels-container">
           <InputPanel
             inputText={inputText}
             setInputText={setInputText}
             fileName={fileName}
-            isLoading={isLoading}
-            loadingMessage={loadingMessage}
-            error={error}
+            isLoading={isExtracting || isParsing}
             fileInputRef={fileInputRef}
             copyButtonText={copyButtonText}
             onFileChange={onFileChange}
@@ -324,9 +407,6 @@ function App() {
             pairedData={pairedData}
             isLoading={isParsing}
             isAnalyzing={isAnalyzing}
-            loadingMessage={loadingMessage}
-            statusMessage={statusMessage}
-            analysisError={analysisError}
             onUploadCSV={onUploadCSV}
             csvFileInputRef={csvFileInputRef}
             onAnalyze={onAnalyze}
@@ -341,14 +421,36 @@ function App() {
           <InsightsPanel
             insights={insights}
             isLoading={isFindingInsights}
-            error={insightsError}
             isMinimized={isInsightsMinimized}
             onToggleMinimize={() => setIsInsightsMinimized(p => !p)}
           />
         </div>
+      </>
+    );
+  };
+
+  return (
+    <>
+      <Header 
+        ref={headerRef}
+        isVisible={isHeaderVisible || view === 'toolbox'} 
+        message={headerMessage}
+        isLoading={isHeaderLoading}
+      />
+      <main>
+        {renderCurrentView()}
       </main>
-      <Footer />
-      <FabMenu />
+      <Footer 
+        view={view}
+        toolboxView={toolboxView}
+        activeTabIndex={activeToolboxTab}
+        onTabSelect={handleToolboxTabSelect}
+        onGoHome={handleGoHome}
+      />
+      <FabMenu 
+        view={view}
+        onToggleView={handleToggleView}
+      />
     </>
   );
 }

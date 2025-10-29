@@ -1,13 +1,33 @@
-// FIX: Removed side-effect import of 'react' to resolve module augmentation error.
-import type { DetailedHTMLProps, HTMLAttributes } from 'react';
+// FIX: Added import for React to make the namespace available for type augmentation.
+import React from 'react';
 
-export interface ProtocolEntry {
-  id: number;
-  speaker: string;
-  role: string; // e.g., 'Vorsitzender', 'Zeuge', 'Abgeordneter'
-  type: string; // e.g., 'Frage', 'Antwort', 'Verfahrenshinweis'
-  content: string;
-  sourceReference: string;
+// This allows us to use Material Web Components in React and get type safety for their properties.
+declare global {
+  // FIX: Changed namespace from React to JSX to match what TypeScript's JSX factory expects.
+  namespace JSX {
+    interface IntrinsicElements {
+      'md-circular-progress': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { indeterminate?: boolean; 'aria-label'?: string; }, HTMLElement>;
+      'md-linear-progress': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { indeterminate?: boolean; }, HTMLElement>;
+      'md-icon-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { 'aria-label'?: string, title?: string, disabled?: boolean }, HTMLElement>;
+      'md-filled-tonal-icon-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { title?: string, disabled?: boolean }, HTMLElement>;
+      'md-outlined-icon-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { title?: string, disabled?: boolean }, HTMLElement>;
+      'md-filled-icon-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { title?: string, disabled?: boolean }, HTMLElement>;
+      'md-outlined-text-field': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & {
+        id?: string;
+        type?: string;
+        rows?: number;
+        value?: string;
+        label?: string;
+        readOnly?: boolean;
+        disabled?: boolean;
+      }, HTMLElement>;
+      'md-filled-tonal-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { 'aria-label'?: string, disabled?: boolean }, HTMLElement>;
+      'md-filled-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { disabled?: boolean }, HTMLElement>;
+      'md-outlined-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { disabled?: boolean }, HTMLElement>;
+      'md-text-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { title?: string, disabled?: boolean }, HTMLElement>;
+      'md-fab': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { variant?: string; size?: string; 'aria-label'?: string; disabled?: boolean; }, HTMLElement>;
+    }
+  }
 }
 
 export interface ParsedEntry {
@@ -18,55 +38,27 @@ export interface ParsedEntry {
   witness: string | null;
   answer: string | null;
   note: string | null;
-  // Analysis fields
   kernaussage?: string;
   zugeordneteKategorien?: string;
   begruendung?: string;
 }
 
-export interface AnalysisEntry {
-  id: number;
-  kernaussage: string;
-  zugeordneteKategorien: string;
-  begruendung: string;
+export interface KeyInsightItem {
+    title: string;
+    description: string;
+    references: string;
 }
 
 export interface KeyInsights {
-  summary: string;
-  insights: InsightItem[];
+    summary: string;
+    insights: KeyInsightItem[];
 }
 
-export interface InsightItem {
-  title: string;
-  description: string;
-  references: string;
+export interface CorpusItem {
+    id: string;
+    category: string;
+    description: string;
 }
 
-// Augment the 'react' module to include our custom web component types.
-// This is the correct way to add custom elements to JSX's IntrinsicElements
-// in a modular TypeScript project.
-declare module 'react' {
-  namespace JSX {
-    interface IntrinsicElements {
-      // FIX: Add 'disabled' property to button component types to align with Material Web Components and fix TypeScript errors.
-      'md-elevated-button': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { disabled?: boolean }, HTMLElement>;
-      // FIX: Add 'disabled' property to button component types to align with Material Web Components and fix TypeScript errors.
-      'md-filled-tonal-button': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { disabled?: boolean }, HTMLElement>;
-      // FIX: Add 'disabled' property to button component types to align with Material Web Components and fix TypeScript errors.
-      'md-text-button': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { disabled?: boolean }, HTMLElement>;
-      // FIX: Add 'disabled' property to button component types to align with Material Web Components and fix TypeScript errors.
-      'md-icon-button': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { disabled?: boolean }, HTMLElement>;
-      // FIX: Add 'disabled' property to button component types to align with Material Web Components and fix TypeScript errors.
-      'md-fab': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { variant?: string; label?: string; size?: 'small' | 'medium' | 'large'; disabled?: boolean; }, HTMLElement>;
-      'md-outlined-text-field': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { 
-        label?: string;
-        value?: string;
-        type?: string;
-        rows?: number;
-        disabled?: boolean;
-        onInput?: (event: any) => void;
-       }, HTMLElement>;
-      'md-linear-progress': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { indeterminate: boolean; }, HTMLElement>;
-    }
-  }
-}
+// Ensure this file is treated as a module.
+export {};

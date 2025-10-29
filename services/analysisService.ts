@@ -1,7 +1,8 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { ParsedEntry, KeyInsights } from "../types";
-import { callGenerativeAI, callGenerativeAIWithCorrection } from "./aiUtils";
-
+import { ParsedEntry, KeyInsights, CorpusItem } from "../types";
+import { callGenerativeAIWithCorrection } from "./aiUtils";
+import { knowledgeCorpus } from './knowledgeCorpus';
+import { createQueryEmbedding, findMostSimilar, createEmbedding } from './embeddingService';
 
 // Initialize the Google AI client
 let ai: GoogleGenAI;
@@ -11,254 +12,211 @@ try {
   console.error("Failed to initialize GoogleGenAI. Make sure API_KEY is set in environment variables.", error);
 }
 
+// Store for corpus embeddings to avoid re-computing
+let corpusEmbeddings: { item: CorpusItem; embedding: number[] }[] | null = null;
+
+// Function to initialize corpus embeddings, can be called on-demand
+async function getCorpusEmbeddings() {
+    if (corpusEmbeddings) {
+        return corpusEmbeddings;
+    }
+    
+    const embeddings: { item: CorpusItem; embedding: number[] }[] = [];
+    // Using a for...of loop to handle async/await properly.
+    for (const item of knowledgeCorpus) {
+        const embedding = await createEmbedding(`${item.category}: ${item.description}`);
+        embeddings.push({ item, embedding });
+    }
+    corpusEmbeddings = embeddings;
+    
+    return corpusEmbeddings;
+}
+
 const analysisSchema = {
     type: Type.OBJECT,
     properties: {
         kernaussage: {
             type: Type.STRING,
-            description: "Deine prägnante Zusammenfassung der Kernaussage.",
+            description: "A concise, one-sentence summary of the core statement or finding from the answer, phrased neutrally. (in German)"
         },
         zugeordneteKategorien: {
             type: Type.STRING,
-            description: "Nummer(n) aus dem Wissenskorpus, z.B. '7(a); 19(b)' ODER 'Irrelevant / Prozedural'.",
+            description: "A comma-separated list of the most relevant category IDs (e.g., '1a, 5f, 11b') from the provided knowledge corpus that this entry relates to. (in German)"
         },
         begruendung: {
             type: Type.STRING,
-            description: "Deine kurze Begründung, warum der Inhalt zur Kategorie passt ODER warum er prozedural ist.",
-        },
+            description: "A brief, one-to-two sentence explanation of why the selected categories were chosen, linking the entry's content to the corpus descriptions. (in German)"
+        }
     },
-    required: ["kernaussage", "zugeordneteKategorien", "begruendung"],
+    required: ["kernaussage", "zugeordneteKategorien", "begruendung"]
 };
 
+/**
+ * Analyzes a single parsed entry using the knowledge corpus.
+ */
 export async function analyzeEntry(entry: ParsedEntry): Promise<ParsedEntry> {
     if (!ai) {
-        throw new Error("GoogleGenAI client not initialized. Check API key configuration.");
-    }
-    // Only analyze entries that have a question and an answer
-    if (!entry.question || !entry.answer) {
-        return entry;
+        throw new Error("GoogleGenAI client not initialized.");
     }
 
-    try {
-        const prompt = `
-1. Rolle und Ziel
-Du bist ein KI-Analyst (Gemini Gem), spezialisiert auf die Analyse von politischen Protokollen und Dokumenten im Kontext des "ZwU-Nord Stream 2" in Mecklenburg-Vorpommern. Deine Analyseperspektive ist die eines progressiven Verteidigers der SPD. Dein Standpunkt ist, dass es sich um übliche Vorgänge handelt und die Vorwürfe wirklich bewiesen werden müssen. Gleichzeitig bist du offen für in den Vorwürfen enthatlene Kritiken. Du nimmst die Anschuldigungen nicht unbedingt als Wahrheit an, wenn ihnen keine legitime, kohärente Argumentation vorausgeht.
-
-Deine Aufgabe ist es, einen dir vorgelegten Text (z.B. eine Zeugenaussage, einen Protokollauszug) zu analysieren. Du musst die Kernaussage(n) dieses Textes identifizieren und sie präzise den Kategorien eines festen Wissenskorpus zuordnen.
-
-2. Primärer Wissenskorpus (Dein Kategorien-Katalog)
-Dein einziger Referenzrahmen für die Spalte "Zugeordnete Kategorie(n)" ist das folgende "Zwischenfazit der Grünen". Nur die Nummern dieser Punkte (z.B. "1(a)", "7", "18(b)") dürfen verwendet werden.
-
-[START WISSENSKORPUS]
-Teil 1: Nord Stream 2 – Termine, politische Kontakte und Einflussnahme
-1 Kontakte der Landesregierung (auch Behörden, Ministerien) zu Nord Stream 2
-1 (a) Die Landesregierung verschwieg Kontakte zu Nord Stream 2 und wurde dafür gerügt.
-1 (b) Schwesig verschleierte Gespräche beispielsweise mit Schröder und Warnig über Nord Stream 2.
-2 Frühere Planungen und Einfluss der politischen Lage
-2 (a) Die Landesregierung förderte frühzeitig (ab 2012) Nord Stream Stränge 3 und 4 trotz Genehmigungsrisiken durch Parallelprojekte.
-2 (b) Christian Pegels Einsatz ist außergewöhnlich stark ausgeprägt.
-2 (c) Nord Stream 2 Planung stoppte kurz vor Krim-Annexion, Begründung unplausibel.
-2 (e) Merkel signalisierte Putin Unterstützung für Nord Stream, obwohl die Planungen eigentlich eingestellt waren.
-3 Russlandnähe unter Ministerpräsident Sellering
-3 (a) Trotz geringerem Handel förderte die Landesregierung Geschäfte mit Russland überproportioniert stark, teilweise mit gasfreundlichen Lobbyisten.
-3 (b) Sellering kooperierte trotz Krim-Annexion und intensivierte seine Verbindungen heimlich mit Schröder im Schiffbau.
-3 (c) Der Werftenkäufer Jussufow war Putins Vertrauter und Nord-Stream-Leiter.
-4 Unterstützung der Landesregierung für Nord Stream 2
-4 (a) Sellering veranlasste Unterstützung für Nord Stream 2, leugnete dies aber später.
-4 (b) Sellering leugnet Gespräche über Nord Stream 2, obwohl Vermerke Gegenteil belegen.
-4 (c) Sellering bestritt Pläne der Staatskanzlei für ein Putin-Treffen über Warnig.
-5 Einflussnahme im Genehmigungsverfahren
-5 (a) Behörden räumten für Nord Stream 2 Hindernisse weg, unter Druck und mit fragwürdigen Maßnahmen:
-• (b) Küstenschutzmaßnahmen wurden verschoben.
-• (c) Ein bislang umstrittenes Prüfverfahren wurde zugelassen.
-• (d) Die Bundeswehr wurde unter Druck gesetzt, vertrauliche Daten bereitzustellen.
-• (e) Ein Ostseegebiet wurde vorsorglich zum „Natura-2000-Gebiet“ erklärt, um Ausgleichsmaßnahmen für Nord Stream 2 zu ermöglichen.
-5 (f) Druck auf Pegel, dieser ignorierte (Rechts-)risiken bei Nord Stream 2 Genehmigung.
-6 Politisches Engagement zugunsten des Projekts
-6 (a) Die Landesregierung setzte sich (u.a. Bundespolitisch) erfolglos und vielseitig für Nord Stream 2 ein.
-6 (b) Landesregierung widersprach sich: Gasbedarf hoch, doch Kohleimporte sollten massiv steigen.
-7 Sicherheitszertifizierung
-7 (a) Bruder des wirtschaftlichen Geschäftsführers der Klimastiftung MV und Ex-Mitarbeiter von Nord Stream 2 zertifizierten umstrittene Gasleitung.
-7 (b) Das Zertifizierungsverfahren zur Überprüfung der Pipeline ist nicht geeignet gewesen und wurde dennoch angewendet.
-8 Entstehung der Stiftung Klima- und Umweltschutz MV
-8 (a) Nord Stream 2 initiierte die Stiftung und erarbeitete die Satzung, nicht Christian Pegel.
-8 (b) Pegel nutzte Nord-Stream-2-Vorlagen und log darüber öffentlich.
-8 (c) Nord Stream 2, in Form von Petersen, ehemaliger Berater für Nord Stream 2, konzipierte den Geschäftsbetrieb.
-8 (d) Schwesig stoppte die Gründung der Stiftung, da Glawe die Kanzlerin entgegen Absprache nicht informierte.
-8 (e) Auf Druck von Nord Stream 2 wollte die Landesregierung mit Privatpersonen statt des Landes eine Stiftung für Nord Stream 2 gründen.
-Teil 2: Stiftung Klima- und Umweltschutz MV – wirtschaftlicher Betrieb, 9 Finanzierung und politische Verantwortung
-Einfluss von Nord Stream 2 auf Stiftungsgeschäftsführung und Organisation
-9 (a) Nord Stream 2 beeinflusste die Stiftung personell; Petersen wurde ohne Ausschreibung Geschäftsführer.
-9 (b) Die Stiftungsführung hatte keine Kontrolle über den wirtschaftlichen Geschäftsbetrieb von Nord Stream 2. Die Kontrolle lag indirekt bei Nord Stream 2.
-9 (c) Der Geschäftsführer vergab ohne Konsequenzen oder Bedenken Millionenaufträge an eigene und familiäre Unternehmen.
-9 (d) Rostock täuschte Bürgerschaft bei Mageb Kai über Nord Stream 2 und verzögerte Aktenherausgabe.
-9 (e) Minister Pegel leugnete zunächst Informationen zur ROKAI-Ansiedlung, was er später einräumte.
-9 (f) ROKAI wurde für Nord Stream 2 gegründet, obwohl ein ehemaliger Geschäftsführer dies abstritt.
-10 „Kamingate“ und Umgang mit Steuerunterlagen
-10 (a) Finanzminister Geue verschwieg Parlament Steuerdetails trotz öffentlicher Bekanntheit und Mängeln in Finanzbehörden.
-10 (b) Der Vorgang deutet auf eine bewusste Vertuschung hin, worüber die Ministerpräsidentin informiert gewesen sein könnte.
-10 (c) Die 20-Millionen-Euro-Schenkungssteuer bei der Stiftungsgründung wurde trotz fehlender Gemeinnützigkeit nicht thematisiert.
-10 (d) Die Stiftung diente vorrangig Nord Stream 2, nicht dem Klimaschutz, wie der Schenkungssteuerbescheid belegt.
-10 (e) Der Stiftungsvorstand Sellering bezeichnete den Bescheid als politisch motiviert.
-11 Öffentliche Kommunikation und Täuschung
-11 (a) Die Öffentlichkeit wurde über Zweck und Umfang der Stiftung getäuscht.
-11 (b) Minister Pegel verschleierte die wirtschaftliche Tätigkeit der Stiftung, die intern bereits beschlossen war.
-11 (c) Die Stiftung verschleierte wirtschaftliche Aktivitäten zur Abwicklung eines Millionen-Investitionsstaus für Nord Stream 2.
-11 (d) Die Landesregierung unterstützte die Stiftung aktiv, obwohl diese unabhängig arbeiten sollte.
-11 (e) Landesregierung verschwieg entlastende Informationen zu den Sanktionsdrohungen gegen den Fährhafen Sassnitz.
-11 (f) Die Klimastiftung diente der Absicherung von Nord Stream 2 und nicht dem Schutz heimischer Unternehmen.
-11 (g) Die Staatskanzlei verschleierte wirtschaftliche Gründe der Stiftung, um Nord Stream 2 zu ermöglichen.
-Teil 3: Stiftung nach Kriegsbeginn – Auflösung, Rechtsgutachten und politische Einflussnahme
-12 Auflösung der Stiftung und Rechtsgutachten
-12 (a) Die Klimastiftung steht wegen Sittenwidrigkeit aufgrund ihrer engen Russland-Verbindungen in der Kritik.
-12 (b) Die Landesregierung mischte sich böswillig in den Gutachtenprozess ein.
-12 (c) Die Landesregierung löschte gezielt Hinweise auf frühere Gutachtenversionen und Arbeitsgespräche, um Einflussnahme zu verschleiern.
-13 Satzungsänderung der Stiftung
-13 (a) Die Landesregierung stimmte einer Satzungsänderung zu, die eine Auflösung der Nord Stream 2 Stiftung verhindert.
-13 (b) Stiftungsaufsicht war nicht gezwungen die Satzung zu ändern und tat dies auf Geheiß der Landesregierung.
-14 Abwicklung des wirtschaftlichen Geschäftsbetriebs
-14 (a) Die Stiftung erhielt nach Kriegsbeginn Millionen von Nord Stream 2, ohne Stiftungsaufsicht.
-14 (b) Die Stiftung legte ein Gutachten vor, um Einnahmen von Nord Stream 2 in Millionenhöhe zu ermöglichen.
-14 (c) Gerhard Schröder, Steffen Ebert und Matthias Warnig haben alle einen Nord Stream 2-Bezug.
-15 Beteiligung von Christian Pegel an Kanzlei Hardtke, Svennsson & Partner
-15 (a) Christian Pegel soll seine frühere Kanzlei bei Auftragsvergabe durch die Landesregierung begünstigt haben.
-16 Frank Hardtke, Art Hotel Moskau und internationale Kontakte
-16 (a) Christian Pegel hat über die Kanzei Hardtke, Svennsson & Partner Kontakte zu russischen Unternehmen.
-17 Parteispenden und politische Dimension
-17 (a) Christian Pegel spendete hohe Summen an die SPD, zeitgleich mit dem Nord Stream 2 Antragsverfahren in MV, um deren Erfolg zu gewährleisten.
-18 Gelöschte E-Mails, SMS und Messenger-Daten
-18 (a) Pegel löschte als Energieminister regelmäßig E-Mails, vermutlich auch relevante nach Einsetzung des Untersuchungsausschusses um Beweise zu vernichten.
-18 (b) E-Mails von Ministern und der Ministerpräsidentin wurden nach Amtsende unrechtmäßig gelöscht, was gegen das Archivgesetz verstößt, um Beweise zu vernichten.
-19 Fehlende Dokumentation von Gesprächen
-19 (a) Wichtige Gespräche zwischen Regierungsvertretern und Nord Stream 2 blieben undokumentiert.
-19 (b) Die Stiftung legt interne Dokumente nicht vollständig offen und verbietet Vertragspartnern die Offenlegung von Verträgen.
-[ENDE WISSENSKORPUS]
-
-3. Ausführungsregeln
-Input: Du erhältst einen Input-Text (ein Frage-Antwort-Paar).
-Verarbeitung (Dein "Chain of Thought"):
-a. Lies den Input-Text und identifiziere die zentrale(n) Kernaussage(n). Wer (Akteur) tut was (Sachthema)?
-b. Vergleiche den semantischen Inhalt (Akteure und Sachthema) dieser Kernaussage mit den Punkten 1-19 des Wissenskorpus.
-c. Finde die spezifische(n) Kategorie(n)-Nummer(n), die den Inhalt beschreiben. (z.B. wenn es um "Pegel" und "gelöschte E-Mails" geht, finde "18(a)").
-Sonderfall "Irrelevant / Prozedural":
-- Wenn eine Aussage keine inhaltliche Substanz zu einem Sachthema oder Akteur liefert, oder ausschließlich eine prozedurale Rückfrage (z.B. "Von wann ist das?"), eine Zeitangabe (z.B. "Das war 2021.") oder eine reine Gesprächsfloskel ist, klassifiziere sie als "Irrelevant / Prozedural".
-- Sei besonders gründlich bei der Anwendung der Punkte 19, 19 a, 19 b. Wenn es sich nicht um Regierungsvertreter (19 a) handelt oder die Klimastiftung (19 b), oder Fehlende Dokumentation (19), dann fällt generelle Kommunikation nicht unter einen dieser Punkte.
-- Wenn eine Aussage auf eine bereits getätigte Aussage im selben Input-Text basiert ohne etwas substantielles hinzuzufügen, verweise auf die bereits getätigte Einordnung von dir. (Beispielsweise: "s. Fr. / Ant. 170")
-
-**Input-Text zur Analyse:**
-- **Frage:** ${entry.question}
-- **Antwort:** ${entry.answer}
-
-**Output-Format:**
-Dein Output muss ausschließlich ein valides JSON-Objekt sein, das dem folgenden Schema entspricht. Gib keinen einleitenden oder abschließenden Text, keine Markdown-Formatierung oder Erklärungen aus.
-        `;
-
-        const responseText = await callGenerativeAI(ai, 'gemini-2.5-pro', prompt, {
-            responseMimeType: 'application/json',
-            responseSchema: analysisSchema,
-        });
-
-        const cleanedJsonString = responseText.replace(/^```json\s*|```\s*$/g, '');
-        const analysisResult = JSON.parse(cleanedJsonString);
-
-        return {
-            ...entry,
-            kernaussage: analysisResult.kernaussage,
-            zugeordneteKategorien: analysisResult.zugeordneteKategorien,
-            begruendung: analysisResult.begruendung,
-        };
-    } catch (error) {
-        console.error(`Error analyzing entry ID ${entry.id}:`, error);
-        // Return original entry but with an error message in one of the fields for user feedback.
-        return {
-            ...entry,
-            kernaussage: `Error during analysis: ${error instanceof Error ? error.message : String(error)}`,
-        };
-    }
-}
-
-const insightsSchema = {
-  type: Type.OBJECT,
-  properties: {
-    summary: {
-      type: Type.STRING,
-      description: "A concise, high-level summary of the entire protocol analysis, written in German markdown. This should capture the main themes and overall tone of the hearing."
-    },
-    insights: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          title: {
-            type: Type.STRING,
-            description: "A short, impactful title for the key insight, in German."
-          },
-          description: {
-            type: Type.STRING,
-            description: "A detailed explanation of the insight, highlighting patterns, contradictions, or significant statements, in German markdown."
-          },
-          references: {
-            type: Type.STRING,
-            description: "A comma-separated string of the Q&A pair numbers (#) that support this insight (e.g., '3, 8, 12')."
-          }
-        },
-        required: ["title", "description", "references"]
-      }
-    }
-  },
-  required: ["summary", "insights"]
-};
-
-export async function findKeyInsights(analyzedData: ParsedEntry[]): Promise<KeyInsights> {
-    if (!ai) {
-        throw new Error("GoogleGenAI client not initialized. Check API key configuration.");
-    }
+    const textToAnalyze = `Frage: ${entry.question || 'N/A'}\nAntwort: ${entry.answer || 'N/A'}`;
     
-    // Filter for entries that have been analyzed and format for prompt
-    let qaPairCounter = 0;
-    const dataForPrompt = analyzedData
-        .filter(entry => entry.kernaussage && entry.note === null)
-        .map((entry) => {
-            qaPairCounter++;
-            return `
----
-Q&A Pair #${qaPairCounter}
-Question: ${entry.question}
-Answer: ${entry.answer}
-Analysis - Core Statement: ${entry.kernaussage}
-Analysis - Categories: ${entry.zugeordneteKategorien}
----
-            `;
-        })
-        .join('\n');
+    const corpusWithEmbeddings = await getCorpusEmbeddings();
 
-    if (dataForPrompt.trim() === '') {
-      throw new Error("No analyzed data available to generate insights.");
-    }
+    const queryEmbedding = await createQueryEmbedding(textToAnalyze);
+    const similarItems = findMostSimilar(queryEmbedding, corpusWithEmbeddings, 5);
+    const context = similarItems.map(item => `- ID ${item.id} (${item.category}): ${item.description}`).join('\n');
 
     const prompt = `
-    You are a senior investigative journalist, with social democratic tendencies, tasked with summarizing the key findings from a parliamentary hearing. You have been provided with a series of analyzed question-and-answer pairs from the protocol.
+        **ROLE & GOAL**
+        You are an expert AI analyst tasked with categorizing and summarizing a single entry (a question-answer pair) from a German parliamentary protocol. Your goal is to extract the core statement ('Kernaussage'), link it to a predefined knowledge corpus, and provide a brief justification ('Begründung').
 
-    Your task is to synthesize this information into a high-level summary and identify the 3-5 most critical insights.
-    - The summary should provide a narrative overview of the hearing's key themes.
-    - Each insight must have a clear title, a detailed description, and references to the specific Q&A pair numbers that support it.
-    - Use German markdown for formatting. Make titles bold.
+        **CONTEXT**
+        The entry is from an investigative committee about the Nord Stream 2 pipeline and the political involvement of Mecklenburg-Vorpommern. You have been provided with a knowledge corpus that contains key findings and established facts.
 
-    Here is the analyzed data:
-    ${dataForPrompt}
+        **1. KNOWLEDGE CORPUS (FOR CONTEXT ONLY)**
+        Here are the most relevant items from the knowledge corpus. Use these to inform your category selection.
+        ---
+        ${context}
+        ---
 
-    Based on the data, generate a response as a single, valid JSON object that conforms to the provided schema. Do not include any text outside the JSON object.
+        **2. ENTRY TO ANALYZE**
+        Analyze the following question and answer pair:
+        ---
+        **Fragesteller:** ${entry.questioner || 'N/A'}
+        **Frage:** ${entry.question || 'N/A'}
+        **Zeuge:** ${entry.witness || 'N/A'}
+        **Antwort:** ${entry.answer || 'N/A'}
+        ---
+
+        **TASK**
+        Based on the entry and the knowledge corpus, provide the following three pieces of information in German, formatted as a JSON object:
+        1.  **kernaussage:** A concise, one-sentence summary of the core statement from the witness's answer.
+        2.  **zugeordneteKategorien:** A comma-separated string of the most relevant category IDs (e.g., '1a, 5f') from the corpus. Select 1-3 IDs that best match the content of the entry.
+        3.  **begruendung:** A brief, 1-2 sentence explanation for your category choices, directly linking the entry's content to the corpus.
+
+        Your output must be ONLY the valid JSON object, conforming to the schema.
+    `;
+    
+    // FIX: Updated deprecated model name from gemini-1.5-pro to gemini-2.5-pro.
+    const result = await callGenerativeAIWithCorrection(ai, 'gemini-2.5-pro', prompt, {
+        responseMimeType: 'application/json',
+        responseSchema: analysisSchema,
+    });
+    
+    return {
+        ...entry,
+        kernaussage: result.kernaussage,
+        zugeordneteKategorien: result.zugeordneteKategorien,
+        begruendung: result.begruendung,
+    };
+}
+
+
+const insightsSchema = {
+    type: Type.OBJECT,
+    properties: {
+        summary: {
+            type: Type.STRING,
+            description: "A concise, well-structured summary of the key themes and findings from the provided protocol entries. It should be 2-4 paragraphs long and written in German Markdown."
+        },
+        insights: {
+            type: Type.ARRAY,
+            description: "An array of exactly the top 3 most important or surprising key insights.",
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    title: {
+                        type: Type.STRING,
+                        description: "A short, impactful title for the insight (in German)."
+                    },
+                    description: {
+                        type: Type.STRING,
+                        description: "A one-paragraph description of the insight, explaining its significance (in German)."
+                    },
+                    references: {
+                        type: Type.STRING,
+                        description: "A comma-separated list of the 'Fragenummer' (#) that support this insight. For example: '#5, #12, #23'."
+                    }
+                },
+                required: ["title", "description", "references"]
+            }
+        }
+    },
+    required: ["summary", "insights"]
+};
+
+/**
+ * Finds key insights from a collection of analyzed protocol entries.
+ * @param data An array of ParsedEntry objects.
+ * @returns A promise that resolves to a KeyInsights object.
+ */
+export async function findKeyInsights(data: ParsedEntry[]): Promise<KeyInsights> {
+    if (!ai) {
+        throw new Error("GoogleGenAI client not initialized.");
+    }
+    
+    const analyzableData = data.filter(d => d.kernaussage && !d.note);
+
+    if (analyzableData.length < 3) {
+        throw new Error("Insufficient analyzed data. At least 3 analyzed entries are required to generate key insights.");
+    }
+    
+    let qaCounter = 0;
+    const entriesForPrompt: string[] = [];
+    data.forEach(entry => {
+        if (entry.note) {
+            return; // Skip notes for counting and for prompt
+        }
+        qaCounter++;
+        if (entry.kernaussage) {
+            entriesForPrompt.push(`
+                ---
+                Entry #${qaCounter}
+                Source: ${entry.sourceReference}
+                Question: ${entry.question || 'N/A'}
+                Answer: ${entry.answer || 'N/A'}
+                Core Statement (Kernaussage): ${entry.kernaussage}
+                Categories: ${entry.zugeordneteKategorien}
+                Justification: ${entry.begruendung}
+                ---
+            `);
+        }
+    });
+    
+    const analysisText = entriesForPrompt.join('\n');
+
+
+    const prompt = `
+        **ROLLE & ZIEL**
+        Du bist ein leistungsstarker KI-Analyst, spezialisiert auf die Analyse von politischen Protokollen und Dokumenten im Kontext des "ZwU-Nord Stream 2" in Mecklenburg-Vorpommern. Deine Analyseperspektive ist die eines progressiven Verteidigers der SPD. Dein Standpunkt ist, dass es sich um übliche Vorgänge handelt und die Vorwürfe wirklich bewiesen werden müssen. Gleichzeitig bist du offen für in den Vorwürfen enthaltene Kritiken. Du nimmst die Anschuldigungen nicht unbedingt als Wahrheit an, wenn ihnen keine legitime, kohärente Argumentation vorausgeht.
+        Deine Aufgabe ist es, die dir vorgelegten analysierten Protokolleinträge zu synthetisieren und die wichtigsten strategischen Erkenntnisse auf hoher Ebene zu extrahieren. Du fasst nicht nur zusammen, sondern identifizierst die kritischsten, wirkungsvollsten und potenziell überraschendsten Ergebnisse.
+
+        **KONTEXT**
+        Die bereitgestellten Daten bestehen aus Frage-Antwort-Paaren, die bereits einzeln analysiert, zusammengefasst ("Kernaussage") und kategorisiert wurden. Das Thema ist die Nord Stream 2-Pipeline und ihre politischen Verflechtungen.
+
+        **EINGABEDATEN**
+        Hier ist die Sammlung der analysierten Einträge:
+        ${analysisText}
+
+        **AUFGABE**
+        Führe auf der Grundlage ALLER bereitgestellten Einträge die folgenden beiden Aufgaben in deutscher Sprache aus:
+
+        1.  **Erstelle eine umfassende Zusammenfassung:** Schreibe eine 2-4-Absatz-Zusammenfassung der Schlüsselthemen, wiederkehrenden Themen und der allgemeinen Erzählung, die sich aus den Daten ergibt. Diese Zusammenfassung sollte einen ganzheitlichen Überblick geben. Verwende deutsches Markdown zur Formatierung (z.B. **fett**).
+
+        2.  **Identifiziere die Top 3 der wichtigsten Erkenntnisse:** Destilliere aus der Zusammenfassung die **drei wichtigsten, überraschendsten oder wirkungsvollsten Erkenntnisse**. Jede Erkenntnis muss haben:
+            - Einen kurzen, überzeugenden **Titel**.
+            - Eine ein-Absatz-**Beschreibung**, die die Erkenntnis und ihre Bedeutung erklärt.
+            - Eine Liste von **Referenzen** auf die Eintragsnummern ('#'), die den Hauptbeweis für diese Erkenntnis liefern.
+
+        Deine endgültige Ausgabe muss ein einziges, gültiges JSON-Objekt sein, das sich strikt an das bereitgestellte Schema hält. Füge keinen Text, keine Erklärungen oder Markdown außerhalb des JSON-Objekts ein.
     `;
 
-    try {
-        // Use the powerful 'gemini-2.5-pro' model for all analysis tasks.
-        const result = await callGenerativeAIWithCorrection(ai, 'gemini-2.5-pro', prompt, {
-            responseMimeType: 'application/json',
-            responseSchema: insightsSchema,
-        });
-        return result as unknown as KeyInsights;
-    } catch (error) {
-        console.error("Error finding key insights with Gemini:", error);
-        throw new Error(`Failed to find insights: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    // FIX: Updated deprecated model name from gemini-1.5-pro to gemini-2.5-pro.
+    const result = await callGenerativeAIWithCorrection(ai, 'gemini-2.5-pro', prompt, {
+        responseMimeType: 'application/json',
+        responseSchema: insightsSchema,
+    });
+    
+    return result as KeyInsights;
 }

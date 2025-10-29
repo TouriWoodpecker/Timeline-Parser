@@ -1,37 +1,77 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
+import '../types';
 
-const quotes = [
-  { text: "The old world is dying, and the new world struggles to be born: now is the time of monsters.", author: "Antonio Gramsci" },
-  { text: "I'm a pessimist because of intelligence, but an optimist because of will.", author: "Antonio Gramsci" },
-  { text: "I hate the indifferent.", author: "Antonio Gramsci" },
-  { text: "To tell the truth is revolutionary.", author: "Antonio Gramsci" },
-  { text: "Man is condemned to be free; because once thrown into the world, he is responsible for everything he does.", author: "Jean-Paul Sartre" },
-  { text: "All that we see or seem / Is but a dream within a dream.", author: "Edgar Allan Poe" },
-  { text: "I was ashamed of myself when I realized life was a costume party and I attended with my real face.", author: "Franz Kafka" },
-  { text: "In the fight between you and the world, back the world.", author: "Franz Kafka" },
-  { text: "Don't panic.", author: "Douglas Adams" }
+interface FooterProps {
+  view: 'app' | 'toolbox';
+  toolboxView: 'landing' | 'tools';
+  activeTabIndex: number;
+  onTabSelect: (index: number) => void;
+  onGoHome: () => void;
+}
+
+const tabs = [
+    { label: 'OCR', icon: 'document_scanner' },
+    { label: 'Parser', icon: 'mediation' },
+    { label: 'Home', icon: 'home' },
+    { label: 'Analyze', icon: 'science' },
+    { label: 'Insights', icon: 'insights' }
 ];
 
-export const Footer: React.FC = () => {
-  const [quote, setQuote] = useState({ text: '', author: '' });
+export const Footer: React.FC<FooterProps> = ({ view, toolboxView, activeTabIndex, onTabSelect, onGoHome }) => {
+    
+    const isVisible = view === 'toolbox';
 
-  useEffect(() => {
-    setQuote(quotes[Math.floor(Math.random() * quotes.length)]);
-  }, []);
+    const handleTabClick = (index: number) => {
+        // The middle button (index 2) is "Home"
+        if (index === 2) {
+            onGoHome();
+        } else {
+            onTabSelect(index);
+        }
+    };
 
-  const footerStyle: React.CSSProperties = {
-    padding: '48px 24px',
-    textAlign: 'center',
-    color: 'var(--md-sys-color-on-surface-variant)',
-    fontStyle: 'italic',
-    marginTop: 'auto',
-  };
+    // If we are on the landing page, the "Home" button is active (index 2).
+    // Otherwise, the activeTabIndex determines the active button.
+    const displayIndex = toolboxView === 'landing' ? 2 : activeTabIndex;
 
-  return (
-    <footer style={footerStyle}>
-      <p className="md-typescale-body-medium" style={{ margin: 0 }}>
-        &ldquo;{quote.text}&rdquo; &ndash; {quote.author}
-      </p>
-    </footer>
-  );
+    return (
+        <footer style={{
+            position: 'fixed',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            backgroundColor: 'var(--md-sys-color-surface-container-low)',
+            display: isVisible ? 'flex' : 'none',
+            justifyContent: 'space-around',
+            alignItems: 'stretch', // Make items fill height
+            boxShadow: '0 -1px 3px rgba(0,0,0,0.1)',
+            zIndex: 100
+        }}>
+            {tabs.map((tab, index) => {
+                const isActive = index === displayIndex;
+                // FIX: Cast style object to React.CSSProperties to allow for custom CSS properties.
+                const buttonStyle = {
+                    borderTop: `2px solid ${isActive ? 'var(--md-sys-color-primary)' : 'transparent'}`,
+                    color: isActive ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)',
+                    '--md-text-button-label-text-color': isActive ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)',
+                    '--md-text-button-with-icon-icon-color': isActive ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)',
+                } as React.CSSProperties;
+                
+                return (
+                    <md-text-button
+                        key={tab.label}
+                        className="footer-nav-button"
+                        onClick={() => handleTabClick(index)}
+                        style={buttonStyle}
+                        title={tab.label}
+                    >
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                            <span className="material-symbols-outlined">{tab.icon}</span>
+                            <span className="md-typescale-label-medium">{tab.label}</span>
+                        </div>
+                    </md-text-button>
+                );
+            })}
+        </footer>
+    );
 };

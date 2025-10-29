@@ -36,9 +36,7 @@ export async function createEmbedding(text: string): Promise<number[]> {
     if (!ai) {
         throw new Error("Embedding client not initialized. Check API key.");
     }
-    // FIX: Use string literal for taskType as TaskType enum is not exported.
-    // FIX: The parameter for content is `contents`, not `content`.
-    // FIX: Moved `taskType` into a `config` object to align with the method signature.
+    // FIX: Use `contents` for single text embedding, which is expected by the user's SDK version.
     const response = await ai.models.embedContent({
         model: "text-embedding-004",
         contents: text,
@@ -46,8 +44,8 @@ export async function createEmbedding(text: string): Promise<number[]> {
             taskType: "RETRIEVAL_DOCUMENT"
         }
     });
-    // FIX: The response property is `embeddings` (plural array) not `embedding`.
-    return response.embeddings[0].values;
+    // FIX: The response property from `embedContent` in older SDK versions was `embeddings` (an array).
+    return (response as any).embeddings[0].values;
 }
 
 /**
@@ -57,9 +55,7 @@ export async function createQueryEmbedding(text: string): Promise<number[]> {
      if (!ai) {
         throw new Error("Embedding client not initialized. Check API key.");
     }
-    // FIX: Use string literal for taskType as TaskType enum is not exported.
-    // FIX: The parameter for content is `contents`, not `content`.
-    // FIX: Moved `taskType` into a `config` object to align with the method signature.
+    // FIX: Use `contents` for single text embedding, which is expected by the user's SDK version.
     const response = await ai.models.embedContent({
         model: "text-embedding-004",
         contents: text,
@@ -67,8 +63,8 @@ export async function createQueryEmbedding(text: string): Promise<number[]> {
             taskType: "RETRIEVAL_QUERY"
         }
     });
-    // FIX: The response property is `embeddings` (plural array) not `embedding`.
-    return response.embeddings[0].values;
+    // FIX: The response property from `embedContent` in older SDK versions was `embeddings` (an array).
+    return (response as any).embeddings[0].values;
 }
 
 /**

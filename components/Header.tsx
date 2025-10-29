@@ -1,11 +1,22 @@
 import React, { forwardRef } from 'react';
 import { LogoIcon } from './LogoIcon';
+// FIX: Import types for custom element definitions.
+import '../types';
 
 interface HeaderProps {
   isVisible: boolean;
+  message: string;
+  isLoading: boolean;
 }
 
-export const Header = forwardRef<HTMLElement, HeaderProps>(({ isVisible }, ref) => {
+export const Header = forwardRef<HTMLElement, HeaderProps>(({ 
+  isVisible, 
+  message, 
+  isLoading, 
+}, ref) => {
+  
+  const title = "IPEA";
+
   return (
     <header ref={ref} style={{
       position: 'fixed',
@@ -13,8 +24,7 @@ export const Header = forwardRef<HTMLElement, HeaderProps>(({ isVisible }, ref) 
       left: 0,
       right: 0,
       display: 'flex',
-      alignItems: 'center',
-      padding: '16px 24px',
+      flexDirection: 'column',
       backgroundColor: 'var(--md-sys-color-surface-container-low)',
       zIndex: 100,
       boxSizing: 'border-box',
@@ -22,13 +32,39 @@ export const Header = forwardRef<HTMLElement, HeaderProps>(({ isVisible }, ref) 
       opacity: isVisible ? 1 : 0,
       transform: isVisible ? 'translateY(0)' : 'translateY(-100%)',
       pointerEvents: isVisible ? 'auto' : 'none',
-      // Create a soft fade-out effect at the bottom instead of a hard shadow
-      WebkitMaskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)',
-      maskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)',
+      borderBottom: '1px solid var(--md-sys-color-outline-variant)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', width: '100%' }}>
-        <LogoIcon style={{ height: '1.75rem', width: '1.75rem', flexShrink: 0 }} />
-        <span className="md-typescale-title-large" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>Protocol Parser</span>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', width: '100%', boxSizing: 'border-box' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexShrink: 0 }}>
+          <LogoIcon style={{ height: '1.75rem', width: '1.75rem' }} />
+          <span className="md-typescale-title-large" style={{ whiteSpace: 'nowrap' }}>{title}</span>
+        </div>
+        <div style={{
+          flexGrow: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '16px',
+          minWidth: 0,
+        }}>
+          {isLoading && (
+            <md-circular-progress 
+              indeterminate 
+              style={{ '--md-circular-progress-size': '24px', flexShrink: 0 } as React.CSSProperties} 
+              aria-label="Loading..."
+            />
+          )}
+          <span className="md-typescale-title-medium" style={{
+            color: 'var(--md-sys-color-on-surface-variant)',
+            opacity: message ? 1 : 0,
+            transition: 'opacity 300ms ease-in-out',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}>
+            {message}
+          </span>
+        </div>
       </div>
     </header>
   );

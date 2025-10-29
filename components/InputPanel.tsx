@@ -1,15 +1,13 @@
 import React from 'react';
 import { TextInput } from './TextInput';
-import { LoadingIndicator } from './LoadingSpinner';
-import { ErrorMessage } from './ErrorMessage';
+// FIX: Import types for custom element definitions.
+import '../types';
 
 interface InputPanelProps {
   inputText: string;
   setInputText: (text: string) => void;
   fileName: string;
   isLoading: boolean;
-  loadingMessage: string;
-  error: string | null;
   fileInputRef: React.RefObject<HTMLInputElement>;
   copyButtonText: string;
   onFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
@@ -26,8 +24,6 @@ export const InputPanel: React.FC<InputPanelProps> = ({
   setInputText,
   fileName,
   isLoading,
-  loadingMessage,
-  error,
   fileInputRef,
   copyButtonText,
   onFileChange,
@@ -60,41 +56,34 @@ export const InputPanel: React.FC<InputPanelProps> = ({
         <div className="panel-content">
           {!isMinimized && (
             <>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '24px', alignItems: 'center' }}>
-                  <input type="file" id="pdf-upload" ref={fileInputRef} onChange={onFileChange} style={{ display: 'none' }} accept="application/pdf" />
-                  <md-filled-tonal-button onClick={triggerFileUpload} disabled={isLoading}>
-                      <span className="material-symbols-outlined" slot="icon">upload_file</span>
-                      Upload PDF
-                  </md-filled-tonal-button>
-                  {fileName && <span className="md-typescale-body-medium" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>File: <strong>{fileName}</strong></span>}
-                  <div style={{flexGrow: 1}}></div>
-                  {isLoading && (
-                      <md-filled-tonal-button onClick={onAbortOperation} style={{'--md-filled-tonal-button-container-color': 'var(--md-sys-color-tertiary-container)'} as React.CSSProperties}>
-                          <span className="material-symbols-outlined" slot="icon">cancel</span>
-                          Abort
-                      </md-filled-tonal-button>
-                  )}
-                  <md-elevated-button onClick={onParse} disabled={!inputText.trim() || isLoading}>
-                      <span className="material-symbols-outlined" slot="icon">hub</span>
-                      Parse Protocol
-                  </md-elevated-button>
+              <div style={{ display: 'flex', gap: '16px', marginBottom: '24px', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                      <input type="file" id="pdf-upload" ref={fileInputRef} onChange={onFileChange} style={{ display: 'none' }} accept="application/pdf" />
+                      <md-filled-tonal-icon-button onClick={triggerFileUpload} disabled={isLoading} title="Upload PDF">
+                          <span className="material-symbols-outlined">upload_file</span>
+                      </md-filled-tonal-icon-button>
+                      {fileName && <span className="md-typescale-body-medium" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>File: <strong>{fileName}</strong></span>}
+                  </div>
+                  <div style={{ flexGrow: 1 }}></div>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <md-icon-button onClick={onCopyText} disabled={!inputText.trim() || isLoading} title={copyButtonText}>
+                        <span className="material-symbols-outlined">content_copy</span>
+                      </md-icon-button>
+                      <md-icon-button onClick={onClear} disabled={isLoading} title="Clear All">
+                        <span className="material-symbols-outlined">delete_sweep</span>
+                      </md-icon-button>
+                      {isLoading && (
+                          <md-outlined-icon-button onClick={onAbortOperation} title="Abort Operation">
+                              <span className="material-symbols-outlined">cancel</span>
+                          </md-outlined-icon-button>
+                      )}
+                      <md-filled-icon-button onClick={onParse} disabled={!inputText.trim() || isLoading} title="Parse Protocol">
+                          <span className="material-symbols-outlined">hub</span>
+                      </md-filled-icon-button>
+                  </div>
               </div>
               
-              {error && <ErrorMessage message={error} />}
               <TextInput value={inputText} onInput={handleTextInput} isLoading={isLoading} />
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
-                  <md-text-button onClick={onCopyText} disabled={!inputText.trim() || isLoading}>
-                    <span className="material-symbols-outlined" slot="icon">content_copy</span>
-                    {copyButtonText}
-                  </md-text-button>
-                  <md-text-button onClick={onClear} disabled={isLoading}>
-                    <span className="material-symbols-outlined" slot="icon">delete_sweep</span>
-                    Clear All
-                  </md-text-button>
-              </div>
-
-              {isLoading && loadingMessage && <LoadingIndicator message={loadingMessage} />}
             </>
           )}
         </div>
