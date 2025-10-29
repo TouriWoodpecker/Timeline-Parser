@@ -1,86 +1,94 @@
 import React from 'react';
-import type { PairedProtocolEntry } from '../types';
+import type { ParsedEntry } from '../types';
 
 interface DataTableProps {
-  data: PairedProtocolEntry[];
+  data: ParsedEntry[];
 }
 
-export const DataTable: React.FC<DataTableProps> = ({ data }) => {
-  if (data.length === 0) {
-    return <p className="text-center text-[var(--color-on-surface-variant)]">Keine Daten zum Anzeigen.</p>;
-  }
+const tableStyle: React.CSSProperties = {
+  minWidth: '100%',
+  borderCollapse: 'collapse',
+  fontSize: '0.875rem'
+};
+const cellStyle: React.CSSProperties = {
+  padding: '16px',
+  textAlign: 'left',
+  verticalAlign: 'top',
+  borderTop: '1px solid var(--md-sys-color-outline-variant)'
+};
+const headerCellStyle: React.CSSProperties = {
+  ...cellStyle,
+  fontWeight: 500,
+  color: 'var(--md-sys-color-on-surface-variant)',
+  borderTop: 'none',
+  borderBottom: '1px solid var(--md-sys-color-outline-variant)',
+  backgroundColor: 'var(--md-sys-color-surface)'
+};
 
-  const hasAnalysisData = data.some(entry => entry.kernaussage || entry.zugeordneteKategorien || entry.begruendung);
+export const DataTable: React.FC<DataTableProps> = ({ data }) => {
+  // Counter for "Fragenummer"
   let qaPairCounter = 0;
 
+  // Check if any entry has analysis data to decide whether to show analysis columns.
+  const hasAnalysisData = data.some(d => d.kernaussage || d.zugeordneteKategorien || d.begruendung);
+
   return (
-    <div className="overflow-x-auto border border-[var(--color-outline)]/30 rounded-[var(--radius-m)] bg-[var(--color-surface)]">
-      <table className="min-w-full text-sm">
-        <thead className="border-b border-[var(--color-outline)]/30 bg-[var(--color-surface-variant)]/50">
+    <div style={{ overflowX: 'auto', border: '1px solid var(--md-sys-color-outline-variant)', borderRadius: '8px' }}>
+      <table style={tableStyle}>
+        <thead style={{ backgroundColor: 'var(--md-sys-color-surface)' }}>
           <tr>
-            <th scope="col" className="px-6 py-4 text-left font-semibold text-[var(--color-on-surface-variant)] sticky left-0 bg-inherit z-10 shadow-[5px_0_5px_-5px_rgba(0,0,0,0.1)] dark:shadow-[5px_0_5px_-5px_rgba(0,0,0,0.2)]">
-              #
-            </th>
-            <th scope="col" className="px-6 py-4 text-left font-semibold text-[var(--color-on-surface-variant)]">
-              Fundstelle
-            </th>
-            <th scope="col" className="px-6 py-4 text-left font-semibold text-[var(--color-on-surface-variant)]">
-              Fragesteller
-            </th>
-            <th scope="col" className="px-6 py-4 text-left font-semibold text-[var(--color-on-surface-variant)]">
-              Frage
-            </th>
-            <th scope="col" className="px-6 py-4 text-left font-semibold text-[var(--color-on-surface-variant)]">
-              Zeuge
-            </th>
-            <th scope="col" className="px-6 py-4 text-left font-semibold text-[var(--color-on-surface-variant)]">
-              Antwort
-            </th>
+            <th style={{...headerCellStyle, position: 'sticky', left: 0, zIndex: 1, backgroundColor: 'inherit' }}>#</th>
+            <th style={headerCellStyle}>Fundstelle</th>
+            <th style={headerCellStyle}>Fragesteller</th>
+            <th style={headerCellStyle}>Frage</th>
+            <th style={headerCellStyle}>Zeuge</th>
+            <th style={headerCellStyle}>Antwort</th>
             {hasAnalysisData && (
               <>
-                <th scope="col" className="px-6 py-4 text-left font-semibold text-[var(--color-on-surface-variant)] border-l border-[var(--color-outline)]/30">
-                  Kernaussage
-                </th>
-                <th scope="col" className="px-6 py-4 text-left font-semibold text-[var(--color-on-surface-variant)]">
-                  Zugeordnete Kategorie(n)
-                </th>
-                <th scope="col" className="px-6 py-4 text-left font-semibold text-[var(--color-on-surface-variant)]">
-                  Begründung
-                </th>
+                <th style={{...headerCellStyle, minWidth: '300px'}}>Kernaussage</th>
+                <th style={{...headerCellStyle, minWidth: '250px'}}>Zugeordnete Kategorie(n)</th>
+                <th style={{...headerCellStyle, minWidth: '300px'}}>Begründung</th>
               </>
             )}
           </tr>
         </thead>
         <tbody>
-          {data.map((entry, index) => {
-            const rowBgClass = index % 2 === 0 ? 'bg-[var(--color-surface)]' : 'bg-transparent';
-            const hoverBgClass = 'hover:bg-[var(--color-primary)]/5';
-
+          {data.map((entry) => {
+            // A row is a note if it has content in the note field.
             if (entry.note) {
               return (
-                <tr key={`note-${entry.id}`} className="bg-[var(--color-surface-variant)]/30">
-                  <td colSpan={hasAnalysisData ? 10 : 7} className="px-6 py-4 text-center text-sm text-[var(--color-on-surface-variant)] italic">
-                    {entry.note}
+                <tr key={`note-${entry.id}`} style={{ backgroundColor: 'var(--md-sys-color-surface-container-highest)' }}>
+                  <td style={{...cellStyle, position: 'sticky', left: 0, zIndex: 1, backgroundColor: 'inherit' }}></td>
+                  <td style={cellStyle}>{entry.sourceReference}</td>
+                  <td colSpan={hasAnalysisData ? 7 : 4} style={{...cellStyle, fontStyle: 'italic', color: 'var(--md-sys-color-on-surface-variant)'}}>
+                    Anmerkung: {entry.note}
                   </td>
                 </tr>
               );
             }
-            
+
+            // Only increment counter for actual Q&A pairs or standalone statements.
             qaPairCounter++;
 
+            const isEven = qaPairCounter % 2 === 0;
+            const rowStyle: React.CSSProperties = {
+                backgroundColor: isEven ? 'var(--md-sys-color-surface-container-highest)' : 'var(--md-sys-color-surface)',
+                transition: 'background-color 0.2s'
+            };
+
             return (
-              <tr key={entry.id} className={`transition-colors duration-150 group border-t border-[var(--color-outline)]/30 ${rowBgClass} ${hoverBgClass}`}>
-                <td className={`p-6 whitespace-nowrap font-medium text-[var(--color-on-surface-variant)] align-top sticky left-0 z-10 shadow-[5px_0_5px_-5px_rgba(0,0,0,0.1)] dark:shadow-[5px_0_5px_-5px_rgba(0,0,0,0.2)] transition-colors duration-150 ${rowBgClass} group-hover:bg-[var(--color-primary)]/5`}>{qaPairCounter}</td>
-                <td className="p-6 whitespace-nowrap text-[var(--color-on-surface-variant)] align-top font-mono">{entry.sourceReference}</td>
-                <td className="p-6 whitespace-nowrap font-semibold text-[var(--color-on-surface)] align-top">{entry.questioner}</td>
-                <td className="p-6 text-[var(--color-on-surface)] leading-relaxed align-top min-w-[450px]">{entry.question}</td>
-                <td className="p-6 whitespace-nowrap font-semibold text-[var(--color-on-surface)] align-top">{entry.witness}</td>
-                <td className="p-6 text-[var(--color-on-surface)] leading-relaxed align-top min-w-[450px]">{entry.answer}</td>
+              <tr key={entry.id} style={rowStyle}>
+                <td style={{...cellStyle, position: 'sticky', left: 0, zIndex: 1, backgroundColor: 'inherit', fontWeight: 500, color: 'var(--md-sys-color-on-surface-variant)'}}>{entry.question ? qaPairCounter : ''}</td>
+                <td style={cellStyle}>{entry.sourceReference}</td>
+                <td style={{...cellStyle, fontWeight: 500}}>{entry.questioner}</td>
+                <td style={{...cellStyle, minWidth: '450px'}}>{entry.question}</td>
+                <td style={{...cellStyle, fontWeight: 500}}>{entry.witness}</td>
+                <td style={{...cellStyle, minWidth: '450px'}}>{entry.answer}</td>
                 {hasAnalysisData && (
                   <>
-                    <td className="p-6 text-[var(--color-on-surface)] leading-relaxed align-top min-w-[450px] border-l border-[var(--color-outline)]/30 bg-[var(--color-primary)]/5">{entry.kernaussage}</td>
-                    <td className="p-6 whitespace-nowrap font-semibold text-[var(--color-on-surface)] align-top font-mono bg-[var(--color-primary)]/5">{entry.zugeordneteKategorien}</td>
-                    <td className="p-6 text-[var(--color-on-surface)] leading-relaxed align-top min-w-[450px] bg-[var(--color-primary)]/5">{entry.begruendung}</td>
+                    <td style={{...cellStyle, minWidth: '300px'}}>{entry.kernaussage}</td>
+                    <td style={{...cellStyle, minWidth: '250px'}}>{entry.zugeordneteKategorien}</td>
+                    <td style={{...cellStyle, minWidth: '300px'}}>{entry.begruendung}</td>
                   </>
                 )}
               </tr>

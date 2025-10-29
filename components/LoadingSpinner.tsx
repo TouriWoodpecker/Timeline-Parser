@@ -1,27 +1,14 @@
 import React from 'react';
 
-interface LoadingSpinnerProps {
+interface LoadingIndicatorProps {
   message: string;
 }
 
-export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ message }) => {
+export const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({ message }) => {
   return (
-    <div className="flex flex-col items-center justify-center p-8 space-y-6">
-      <div className="w-12 h-12 animate-[m3-spinner-rotate_1.4s_linear_infinite]">
-        <svg className="w-full h-full" viewBox="0 0 48 48" aria-hidden="true">
-          <circle
-            className="animate-[m3-spinner-arc_1.4s_ease-in-out_infinite]"
-            cx="24"
-            cy="24"
-            r="20"
-            fill="none"
-            strokeWidth="4"
-            stroke="currentColor"
-            strokeLinecap="round"
-          />
-        </svg>
-      </div>
-      <p className="text-[var(--color-on-surface-variant)] font-semibold">{message}</p>
+    <div style={{ padding: '24px 0', width: '100%' }}>
+      <p className="md-typescale-body-large" style={{ color: 'var(--md-sys-color-on-surface-variant)', textAlign: 'center', margin: 0, marginBottom: '16px' }}>{message}</p>
+      <md-linear-progress indeterminate></md-linear-progress>
     </div>
   );
 };

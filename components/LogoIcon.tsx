@@ -1,15 +1,15 @@
 import React from 'react';
 
-export const LogoIcon: React.FC<{ className?: string }> = ({ className }) => {
+export const LogoIcon: React.FC<{ style?: React.CSSProperties }> = ({ style }) => {
   return (
     <svg 
-      className={className} 
+      style={style}
       viewBox="0 0 100 100" 
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
     >
-      <circle cx="50" cy="50" r="50" fill="black" />
-      <g stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="50" cy="50" r="50" fill="var(--md-sys-color-on-background)" />
+      <g stroke="var(--md-sys-color-background)" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round">
         {/* Document */}
         <path d="M 35 25 H 65 V 75 H 35 Z" fill="none" />
         {/* Lines on document */}

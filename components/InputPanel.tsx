@@ -1,13 +1,12 @@
 import React from 'react';
 import { TextInput } from './TextInput';
-import { LoadingSpinner } from './LoadingSpinner';
+import { LoadingIndicator } from './LoadingSpinner';
 import { ErrorMessage } from './ErrorMessage';
 
 interface InputPanelProps {
   inputText: string;
   setInputText: (text: string) => void;
   fileName: string;
-  setFileName: (name: string) => void;
   isLoading: boolean;
   loadingMessage: string;
   error: string | null;
@@ -19,6 +18,7 @@ interface InputPanelProps {
   onClear: () => void;
   isMinimized: boolean;
   onToggleMinimize: () => void;
+  onAbortOperation: () => void;
 }
 
 export const InputPanel: React.FC<InputPanelProps> = ({
@@ -36,84 +36,68 @@ export const InputPanel: React.FC<InputPanelProps> = ({
   onClear,
   isMinimized,
   onToggleMinimize,
+  onAbortOperation,
 }) => {
-  const handleClearClick = () => {
-    const isConfirmed = window.confirm('Are you sure you want to clear all input and parsed data? This action cannot be undone.');
-    if (isConfirmed) {
-      onClear();
-    }
+  const handleTextInput = (e: React.FormEvent<HTMLInputElement>) => {
+    setInputText((e.target as HTMLInputElement).value);
   };
 
-  const textButtonClasses = "px-4 h-10 text-sm font-semibold text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 disabled:opacity-50 disabled:cursor-not-allowed rounded-[var(--radius-full)] transition-colors duration-200";
-  const filledButtonClasses = "px-6 h-12 text-sm font-semibold text-[var(--color-on-primary)] bg-[var(--color-primary)] rounded-[var(--radius-full)] shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary)] disabled:bg-[var(--color-outline)] disabled:shadow-none disabled:cursor-not-allowed transition-all duration-200 hover:-translate-y-px active:translate-y-0 active:shadow-md";
+  const triggerFileUpload = () => {
+    fileInputRef.current?.click();
+  };
 
   return (
-    <div className="w-full bg-[var(--color-surface)] rounded-[var(--radius-l)] shadow-lg shadow-black/5 dark:shadow-black/20 border border-[var(--color-outline)]/20">
-      <div className="flex justify-between items-center p-6 flex-wrap gap-x-8 gap-y-4">
-        <div className="flex items-center gap-4">
-            <h2 className="text-2xl font-bold text-[var(--color-on-surface)] tracking-tight">Input</h2>
-            <button
-                onClick={onToggleMinimize}
-                className="p-2 rounded-full hover:bg-[var(--color-primary)]/10 transition-colors"
-                aria-label={isMinimized ? 'Expand Input section' : 'Collapse Input section'}
-                aria-expanded={!isMinimized}
-            >
-                <svg className={`w-6 h-6 text-[var(--color-on-surface-variant)] transition-transform duration-300 ${isMinimized ? '' : 'rotate-180'}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-                </svg>
-            </button>
+    <div className={`card ${isMinimized ? 'card--filled' : 'card--elevated'}`}>
+        <div className="panel-header" onClick={onToggleMinimize} style={{ cursor: 'pointer' }}>
+            <div className="panel-header-title">
+                <h2 className="md-typescale-title-large" style={{ margin: 0 }}>Input</h2>
+            </div>
+            <md-icon-button aria-label={isMinimized ? 'Expand panel' : 'Collapse panel'}>
+                <span className="material-symbols-outlined">{isMinimized ? 'expand_more' : 'expand_less'}</span>
+            </md-icon-button>
         </div>
-        {!isMinimized && (
-          <div className="flex items-center gap-2 flex-wrap">
-              <label htmlFor="file-upload" className={`${textButtonClasses} inline-flex items-center ${isLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
-                Upload PDF
-                <input id="file-upload" name="file-upload" type="file" className="sr-only" onChange={onFileChange} ref={fileInputRef} accept=".pdf" disabled={isLoading} />
-              </label>
-               {fileName && <p className="text-sm text-[var(--color-on-surface-variant)] hidden sm:block">File: {fileName}</p>}
-               <span className="text-[var(--color-outline)]/30 hidden sm:inline mx-2">|</span>
-              <button
-                  onClick={onParse}
-                  disabled={!inputText.trim() || isLoading}
-                  className={filledButtonClasses}
-              >
-                  Parse Protocol
-              </button>
-          </div>
-        )}
-      </div>
-      
-      <div className={`grid transition-[grid-template-rows] duration-500 ease-in-out ${isMinimized ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}>
-        <div className="overflow-hidden">
-          <div className="p-6 pt-6 border-t border-[var(--color-outline)]/20">
-              <TextInput
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  isLoading={isLoading}
-              />
 
-              {error && <ErrorMessage message={error} />}
-
-              {isLoading && loadingMessage && <LoadingSpinner message={loadingMessage} />}
-              
-              <div className="mt-6 flex justify-end flex-wrap gap-2">
-                  <button 
-                      onClick={onCopyText}
-                      className={textButtonClasses}
-                      disabled={!inputText || isLoading}
-                      >
-                      {copyButtonText}
-                  </button>
-                  <button 
-                      onClick={handleClearClick} 
-                      disabled={isLoading}
-                      className={textButtonClasses}
-                  >
-                      Clear All
-                  </button>
+        <div className="panel-content">
+          {!isMinimized && (
+            <>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '24px', alignItems: 'center' }}>
+                  <input type="file" id="pdf-upload" ref={fileInputRef} onChange={onFileChange} style={{ display: 'none' }} accept="application/pdf" />
+                  <md-filled-tonal-button onClick={triggerFileUpload} disabled={isLoading}>
+                      <span className="material-symbols-outlined" slot="icon">upload_file</span>
+                      Upload PDF
+                  </md-filled-tonal-button>
+                  {fileName && <span className="md-typescale-body-medium" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>File: <strong>{fileName}</strong></span>}
+                  <div style={{flexGrow: 1}}></div>
+                  {isLoading && (
+                      <md-filled-tonal-button onClick={onAbortOperation} style={{'--md-filled-tonal-button-container-color': 'var(--md-sys-color-tertiary-container)'} as React.CSSProperties}>
+                          <span className="material-symbols-outlined" slot="icon">cancel</span>
+                          Abort
+                      </md-filled-tonal-button>
+                  )}
+                  <md-elevated-button onClick={onParse} disabled={!inputText.trim() || isLoading}>
+                      <span className="material-symbols-outlined" slot="icon">hub</span>
+                      Parse Protocol
+                  </md-elevated-button>
               </div>
-          </div>
+              
+              {error && <ErrorMessage message={error} />}
+              <TextInput value={inputText} onInput={handleTextInput} isLoading={isLoading} />
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+                  <md-text-button onClick={onCopyText} disabled={!inputText.trim() || isLoading}>
+                    <span className="material-symbols-outlined" slot="icon">content_copy</span>
+                    {copyButtonText}
+                  </md-text-button>
+                  <md-text-button onClick={onClear} disabled={isLoading}>
+                    <span className="material-symbols-outlined" slot="icon">delete_sweep</span>
+                    Clear All
+                  </md-text-button>
+              </div>
+
+              {isLoading && loadingMessage && <LoadingIndicator message={loadingMessage} />}
+            </>
+          )}
         </div>
-      </div>
     </div>
   );
 };

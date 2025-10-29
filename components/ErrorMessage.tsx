@@ -6,9 +6,16 @@ interface ErrorMessageProps {
 
 export const ErrorMessage: React.FC<ErrorMessageProps> = ({ message }) => {
   return (
-    <div className="bg-[var(--color-error-container)]/50 border-l-4 border-[var(--color-error)] text-[var(--color-error)] p-4 my-4 rounded-r-lg" role="alert">
-      <p className="font-bold">Error</p>
-      <pre className="whitespace-pre-wrap font-sans">{message}</pre>
+    <div style={{
+      backgroundColor: 'var(--md-sys-color-error-container)',
+      color: 'var(--md-sys-color-on-error-container)',
+      padding: '16px',
+      margin: '16px 0',
+      borderRadius: '8px',
+      border: '1px solid var(--md-sys-color-error)'
+    }}>
+      <p style={{ fontWeight: 'bold', margin: '0 0 8px 0' }}>Error</p>
+      <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', margin: 0 }}>{message}</pre>
     </div>
   );
 };

@@ -1,11 +1,11 @@
 import React from 'react';
 import { DataTable } from './DataTable';
-import { LoadingSpinner } from './LoadingSpinner';
+import { LoadingIndicator } from './LoadingSpinner';
 import { ErrorMessage } from './ErrorMessage';
-import type { PairedProtocolEntry } from '../types';
+import type { ParsedEntry } from '../types';
 
 interface TimelinePanelProps {
-  pairedData: PairedProtocolEntry[];
+  pairedData: ParsedEntry[];
   isLoading: boolean;
   isAnalyzing: boolean;
   loadingMessage: string;
@@ -16,8 +16,11 @@ interface TimelinePanelProps {
   onAnalyze: () => void;
   onStopAnalysis: () => void;
   onExportCSV: () => void;
+  onExportXLSX: () => void;
   isMinimized: boolean;
   onToggleMinimize: () => void;
+  onFindInsights: () => void;
+  isFindingInsights: boolean;
 }
 
 export const TimelinePanel: React.FC<TimelinePanelProps> = ({
@@ -32,95 +35,87 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
   onAnalyze,
   onStopAnalysis,
   onExportCSV,
+  onExportXLSX,
   isMinimized,
   onToggleMinimize,
+  onFindInsights,
+  isFindingInsights,
 }) => {
+  const triggerCsvUpload = () => csvFileInputRef.current?.click();
+  
   const hasData = pairedData.length > 0;
-
-  const textButtonClasses = "px-4 h-10 text-sm font-semibold text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 disabled:opacity-50 disabled:cursor-not-allowed rounded-[var(--radius-full)] transition-colors duration-200";
-  const filledButtonClasses = "px-6 h-12 text-sm font-semibold text-[var(--color-on-primary)] bg-[var(--color-primary)] rounded-[var(--radius-full)] shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary)] disabled:bg-[var(--color-outline)] disabled:shadow-none disabled:cursor-not-allowed transition-all duration-200 hover:-translate-y-px active:translate-y-0 active:shadow-md";
+  const hasAnalysisData = hasData && pairedData.some(d => d.kernaussage);
 
   return (
-    <div className="w-full bg-[var(--color-surface)] rounded-[var(--radius-l)] shadow-lg shadow-black/5 dark:shadow-black/20 border border-[var(--color-outline)]/20">
-      <div className="flex justify-between items-center p-6 flex-wrap gap-x-8 gap-y-4">
-        <div className="flex items-center gap-4">
-            <h2 className="text-2xl font-bold text-[var(--color-on-surface)] tracking-tight">Output</h2>
-             <button
-                onClick={onToggleMinimize}
-                className="p-2 rounded-full hover:bg-[var(--color-primary)]/10 transition-colors"
-                aria-label={isMinimized ? 'Expand Output section' : 'Collapse Output section'}
-                aria-expanded={!isMinimized}
-            >
-                <svg className={`w-6 h-6 text-[var(--color-on-surface-variant)] transition-transform duration-300 ${isMinimized ? '' : 'rotate-180'}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-                </svg>
-            </button>
-        </div>
-        {!isMinimized && (
-            <div className="flex items-center gap-2 flex-wrap">
-                <label htmlFor="csv-upload" className={`${textButtonClasses} inline-flex items-center ${isLoading || isAnalyzing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
-                    Upload CSV
-                    <input id="csv-upload" name="csv-upload" type="file" className="sr-only" onChange={onUploadCSV} ref={csvFileInputRef} accept=".csv" disabled={isLoading || isAnalyzing} />
-                </label>
-                <span className="text-[var(--color-outline)]/30 hidden sm:inline mx-2">|</span>
-                {isAnalyzing ? (
-                  <button
-                    onClick={onStopAnalysis}
-                    className={`${filledButtonClasses} bg-[var(--color-error)] dark:bg-[var(--color-error-container)] dark:text-black hover:shadow-red-500/30 focus:ring-red-500`}
-                  >
-                    Stop Analysis
-                  </button>
-                ) : (
-                  <button
-                    onClick={onAnalyze}
-                    disabled={!hasData || isLoading}
-                    className={filledButtonClasses}
-                  >
-                    Analyze Timeline
-                  </button>
-                )}
+    <div className={`card ${isMinimized ? 'card--filled' : 'card--elevated'}`}>
+        <div className="panel-header" onClick={onToggleMinimize} style={{ cursor: 'pointer' }}>
+            <div className="panel-header-title">
+                <h2 className="md-typescale-title-large" style={{ margin: 0 }}>Protocol Timeline</h2>
             </div>
-        )}
-      </div>
-      
-      <div className={`grid transition-[grid-template-rows] duration-500 ease-in-out ${isMinimized ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}>
-        <div className="overflow-hidden">
-          <div className="p-6 pt-6 border-t border-[var(--color-outline)]/20">
-            {analysisError && <ErrorMessage message={analysisError} />}
-
-            {isAnalyzing ? (
-              <LoadingSpinner message={loadingMessage || "AI is analyzing the timeline..."} />
-            ) : statusMessage ? (
-              <div className="text-center p-8">
-                <p className="text-[var(--color-on-surface-variant)] font-semibold animate-pulse">{statusMessage}</p>
-              </div>
-            ) : null}
-            
-            {isLoading && !hasData ? (
-                <div className="text-center py-16">
-                    <p className="text-[var(--color-on-surface-variant)]">Waiting for protocol to be parsed...</p>
-                </div>
-            ) : hasData ? (
-                <>
-                  <DataTable data={pairedData} />
-                  <div className="mt-6 flex justify-end">
-                    <button
-                      onClick={onExportCSV}
-                      disabled={isLoading || isAnalyzing}
-                      className={filledButtonClasses}
-                    >
-                      Download Sheet
-                    </button>
-                  </div>
-                </>
-            ) : (
-                <div className="text-center py-16 border-2 border-dashed border-[var(--color-outline)]/30 rounded-[var(--radius-m)]">
-                    <p className="text-[var(--color-on-surface-variant)]">Your structured timeline will appear here after parsing.</p>
-                </div>
-            )}
-          </div>
+            <md-icon-button aria-label={isMinimized ? 'Expand panel' : 'Collapse panel'}>
+                <span className="material-symbols-outlined">{isMinimized ? 'expand_more' : 'expand_less'}</span>
+            </md-icon-button>
         </div>
-      </div>
+        <div className="panel-content">
+            {!isMinimized && (
+              <>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '24px' }}>
+                    <input type="file" id="csv-upload" ref={csvFileInputRef} onChange={onUploadCSV} style={{ display: 'none' }} accept=".csv" />
+                    <md-filled-tonal-button onClick={triggerCsvUpload} disabled={isLoading || isAnalyzing}>
+                        <span className="material-symbols-outlined" slot="icon">upload</span>
+                        Import CSV
+                    </md-filled-tonal-button>
+                    <md-filled-tonal-button onClick={onExportCSV} disabled={!hasData || isLoading || isAnalyzing}>
+                        <span className="material-symbols-outlined" slot="icon">download</span>
+                        Export CSV
+                    </md-filled-tonal-button>
+                    <md-filled-tonal-button onClick={onExportXLSX} disabled={!hasData || isLoading || isAnalyzing}>
+                        <span className="material-symbols-outlined" slot="icon">table_view</span>
+                        Export XLSX
+                    </md-filled-tonal-button>
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--md-sys-color-outline-variant)', margin: '24px 0' }} />
+
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                    <md-elevated-button onClick={onAnalyze} disabled={!hasData || isAnalyzing || isLoading}>
+                        <span className="material-symbols-outlined" slot="icon">science</span>
+                        Analyze Timeline
+                    </md-elevated-button>
+                    {isAnalyzing && (
+                    <md-filled-tonal-button onClick={onStopAnalysis} style={{'--md-filled-tonal-button-container-color': 'var(--md-sys-color-tertiary-container)'} as React.CSSProperties}>
+                        <span className="material-symbols-outlined" slot="icon">stop_circle</span>
+                        Stop Analysis
+                    </md-filled-tonal-button>
+                    )}
+                    <md-elevated-button onClick={onFindInsights} disabled={!hasAnalysisData || isFindingInsights || isAnalyzing || isLoading}>
+                        <span className="material-symbols-outlined" slot="icon">insights</span>
+                        Find Key Insights
+                    </md-elevated-button>
+                </div>
+
+                {isAnalyzing && loadingMessage && <LoadingIndicator message={loadingMessage} />}
+                {statusMessage && <p style={{ margin: '16px 0', fontStyle: 'italic', color: 'var(--md-sys-color-on-surface-variant)', whiteSpace: 'pre-wrap' }}>{statusMessage}</p>}
+                {analysisError && <ErrorMessage message={analysisError} />}
+
+                {(hasData || isLoading) ? (
+                    <div style={{ marginTop: '24px' }}><DataTable data={pairedData} /></div>
+                ) : (
+                    <div style={{
+                      marginTop: '24px',
+                      padding: '48px 24px',
+                      textAlign: 'center',
+                      border: '1px dashed var(--md-sys-color-outline-variant)',
+                      borderRadius: '8px'
+                    }}>
+                      <span className="material-symbols-outlined" style={{fontSize: '48px', color: 'var(--md-sys-color-surface-variant)'}}>summarize</span>
+                      <h3 className="md-typescale-title-medium" style={{marginTop: '16px', color: 'var(--md-sys-color-on-surface-variant)'}}>No Timeline Data</h3>
+                      <p className="md-typescale-body-medium" style={{color: 'var(--md-sys-color-on-surface-variant)'}}>Your parsed protocol will appear here.</p>
+                    </div>
+                )}
+              </>
+            )}
+        </div>
     </div>
   );
 };
