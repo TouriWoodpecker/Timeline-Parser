@@ -6,7 +6,6 @@ import { getRandomQuote } from '../../utils/quotes';
 import { ParsedEntry } from '../../types';
 import { exportToCsv } from '../../services/fileService';
 import { DataTable } from '../DataTable';
-import '../../types';
 
 interface ParserModuleProps {
     setLoading: (loading: boolean) => void;

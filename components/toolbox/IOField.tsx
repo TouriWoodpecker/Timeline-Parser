@@ -1,6 +1,4 @@
 import React, { useState } from 'react';
-// FIX: Import types for custom element definitions.
-import '../../types';
 
 interface IOFieldProps {
     label: string;

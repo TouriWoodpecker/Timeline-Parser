@@ -1,7 +1,5 @@
 import React, { forwardRef } from 'react';
 import { LogoIcon } from './LogoIcon';
-// FIX: Import types for custom element definitions.
-import '../types';
 
 interface HeaderProps {
   isVisible: boolean;

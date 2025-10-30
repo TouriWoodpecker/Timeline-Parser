@@ -1,21 +1,23 @@
-// FIX: Added import for React to make the namespace available for type augmentation.
-import React from 'react';
+// types.ts
 
-// This allows us to use Material Web Components in React and get type safety for their properties.
-declare global {
-  // FIX: Changed namespace from React to JSX to match what TypeScript's JSX factory expects.
+// FIX: Add a direct import of 'react' to make module augmentation work correctly.
+// This ensures the file is treated as a module, allowing module augmentation to find and extend the 'react' module.
+import 'react';
+
+// Wir importieren nur die TYPEN, die wir brauchen.
+import type { DetailedHTMLProps, HTMLAttributes } from 'react';
+
+// Wir erweitern das Modul 'react'
+declare module 'react' {
   namespace JSX {
-    // FIX: Augmented IntrinsicElements for custom components by extending the base React types.
-    // Without `extends React.JSX.IntrinsicElements`, the base HTML element types are overwritten
-    // instead of being augmented, which caused all standard HTML tags to be unrecognized by TypeScript.
-    interface IntrinsicElements extends React.JSX.IntrinsicElements {
-      'md-circular-progress': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { indeterminate?: boolean; 'aria-label'?: string; }, HTMLElement>;
-      'md-linear-progress': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { indeterminate?: boolean; }, HTMLElement>;
-      'md-icon-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { 'aria-label'?: string, title?: string, disabled?: boolean }, HTMLElement>;
-      'md-filled-tonal-icon-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { title?: string, disabled?: boolean }, HTMLElement>;
-      'md-outlined-icon-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { title?: string, disabled?: boolean }, HTMLElement>;
-      'md-filled-icon-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { title?: string, disabled?: boolean }, HTMLElement>;
-      'md-outlined-text-field': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & {
+    interface IntrinsicElements {
+      'md-circular-progress': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { indeterminate?: boolean; 'aria-label'?: string; }, HTMLElement>;
+      'md-linear-progress': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { indeterminate?: boolean; }, HTMLElement>;
+      'md-icon-button': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { 'aria-label'?: string, title?: string, disabled?: boolean }, HTMLElement>;
+      'md-filled-tonal-icon-button': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { title?: string, disabled?: boolean }, HTMLElement>;
+      'md-outlined-icon-button': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { title?: string, disabled?: boolean }, HTMLElement>;
+      'md-filled-icon-button': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { title?: string, disabled?: boolean }, HTMLElement>;
+      'md-outlined-text-field': DetailedHTMLProps<HTMLAttributes<HTMLElement> & {
         id?: string;
         type?: string;
         rows?: number;
@@ -24,15 +26,16 @@ declare global {
         readOnly?: boolean;
         disabled?: boolean;
       }, HTMLElement>;
-      'md-filled-tonal-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { 'aria-label'?: string, disabled?: boolean }, HTMLElement>;
-      'md-filled-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { disabled?: boolean }, HTMLElement>;
-      'md-outlined-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { disabled?: boolean }, HTMLElement>;
-      'md-text-button': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { title?: string, disabled?: boolean }, HTMLElement>;
-      'md-fab': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { variant?: string; size?: string; 'aria-label'?: string; disabled?: boolean; }, HTMLElement>;
+      'md-filled-tonal-button': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { 'aria-label'?: string, disabled?: boolean }, HTMLElement>;
+      'md-filled-button': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { disabled?: boolean }, HTMLElement>;
+      'md-outlined-button': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { disabled?: boolean }, HTMLElement>;
+      'md-text-button': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { title?: string, disabled?: boolean }, HTMLElement>;
+      'md-fab': DetailedHTMLProps<HTMLAttributes<HTMLElement> & { variant?: string; size?: string; 'aria-label'?: string; disabled?: boolean; }, HTMLElement>;
     }
   }
 }
 
+// Diese Typen können hier bleiben.
 export interface ParsedEntry {
   id: number;
   sourceReference: string;
@@ -62,6 +65,3 @@ export interface CorpusItem {
     category: string;
     description: string;
 }
-
-// Ensure this file is treated as a module.
-export {};

@@ -1,24 +1,45 @@
-import { GoogleGenAI } from '@google/genai';
-
 const MAX_RETRIES = 4;
 const INITIAL_DELAY_MS = 2000;
 
 export async function callGenerativeAI(
-    ai: GoogleGenAI,
     model: string,
     prompt: string,
     config: any
 ): Promise<string> {
     let lastError: Error | null = null;
+    const url = `/api/v1beta/models/${model}:generateContent`;
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-            const response = await ai.models.generateContent({ model, contents: prompt, config });
-            const responseText = response.text.trim();
-            if (!responseText) {
-                throw new Error("Received an empty response from the AI model.");
+            const requestBody = {
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: config,
+            };
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody),
+            });
+
+            if (!response.ok) {
+                 const errorBody = await response.json().catch(() => ({ message: response.statusText }));
+                 const errorMessage = errorBody.error?.message || response.statusText;
+                 throw new Error(`API Error: ${response.status} - ${errorMessage}`);
             }
-            return responseText;
+            
+            const responseData = await response.json();
+
+            // Extract text from the response based on the Gemini API structure
+            const responseText = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
+
+            if (responseText === undefined) {
+                console.error("Invalid AI response structure:", responseData);
+                throw new Error("Received an invalid or empty response from the AI model.");
+            }
+            
+            return responseText.trim();
+
         } catch (error: any) {
             lastError = error;
             const errorMessage = error.message || '';
@@ -41,8 +62,7 @@ export async function callGenerativeAI(
 }
 
 
-async function fixJson(ai: GoogleGenAI, invalidJson: string, schema: any): Promise<any> {
-  // FIX: Updated the prompt to handle both JSON objects and arrays, not just arrays.
+async function fixJson(invalidJson: string, schema: any): Promise<any> {
   const fixPrompt = `
     The following text is supposed to be a valid JSON object or array conforming to a specific schema, but it contains syntax errors. This is likely due to unescaped double quotes inside string values or premature termination.
 
@@ -59,18 +79,30 @@ async function fixJson(ai: GoogleGenAI, invalidJson: string, schema: any): Promi
     ---
   `;
 
+  const url = `/api/v1beta/models/gemini-2.5-pro:generateContent`;
+  const requestBody = {
+    contents: [{ parts: [{ text: fixPrompt }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: schema,
+    },
+  };
+
   try {
-    const response = await ai.models.generateContent({
-      // FIX: Updated deprecated model name to 'gemini-2.5-pro'.
-      model: 'gemini-2.5-pro',
-      contents: fixPrompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: schema,
-      }
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
     });
 
-    const fixedText = response.text.trim();
+    if (!response.ok) {
+        throw new Error(`AI fixer failed with status: ${response.status}`);
+    }
+
+    const responseData = await response.json();
+    const fixedText = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!fixedText) throw new Error("Fixer AI returned no text.");
+    
     const cleanedFixedJson = fixedText.replace(/^```json\s*|```\s*$/g, '');
     return JSON.parse(cleanedFixedJson);
 
@@ -80,14 +112,13 @@ async function fixJson(ai: GoogleGenAI, invalidJson: string, schema: any): Promi
   }
 }
 
-// FIX: Updated function to be generic for any JSON response (object or array), not just arrays.
+
 export async function callGenerativeAIWithCorrection(
-    ai: GoogleGenAI,
     model: string,
     prompt: string,
     config: any
 ): Promise<any> {
-    const responseText = await callGenerativeAI(ai, model, prompt, config);
+    const responseText = await callGenerativeAI(model, prompt, config);
     
     try {
         const cleanedJsonString = responseText.replace(/^```json\s*|```\s*$/g, '');
@@ -95,7 +126,7 @@ export async function callGenerativeAIWithCorrection(
     } catch (jsonParseError) {
         console.warn(`Initial JSON parsing failed. Attempting to fix...`, { responseText });
         const cleanedJsonString = responseText.replace(/^```json\s*|```\s*$/g, '');
-        const fixedJson = await fixJson(ai, cleanedJsonString, config.responseSchema);
+        const fixedJson = await fixJson(cleanedJsonString, config.responseSchema);
         console.log("JSON successfully fixed and parsed.");
         return fixedJson;
     }

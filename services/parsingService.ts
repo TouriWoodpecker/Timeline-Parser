@@ -1,40 +1,31 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { ParsedEntry } from "../types";
 import { callGenerativeAIWithCorrection } from "./aiUtils";
 
-// Initialize the Google AI client
-let ai: GoogleGenAI;
-try {
-  ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-} catch (error) {
-  console.error("Failed to initialize GoogleGenAI. Make sure API_KEY is set in environment variables.", error);
-}
-
 // Define the schema for the AI's response, which is an array of structured objects.
 const parsingSchema = {
-  type: Type.ARRAY,
+  type: 'ARRAY',
   description: "An array of structured protocol entries, each representing a question/answer pair or a procedural note.",
   items: {
-    type: Type.OBJECT,
+    type: 'OBJECT',
     properties: {
       questioner: {
-        type: Type.STRING,
+        type: 'STRING',
         description: "The name of the person asking the question (e.g., 'Dr. Heiko Mass'). Null if it's a note or a statement without a preceding question.",
       },
       question: {
-        type: Type.STRING,
+        type: 'STRING',
         description: "The full text of the question being asked. Null if it's a note.",
       },
       witness: {
-        type: Type.STRING,
+        type: 'STRING',
         description: "The name of the person answering the question (e.g., 'Zeuge Christian Pegel'). Null if it's a note.",
       },
       answer: {
-        type: Type.STRING,
+        type: 'STRING',
         description: "The full text of the answer. If a witness makes a statement without a direct question, this field should contain that statement, and the 'question' and 'questioner' fields should be null. Null if it's a note.",
       },
       note: {
-        type: Type.STRING,
+        type: 'STRING',
         description: "Procedural notes, interruptions, or comments from the chairperson (e.g., 'Vorsitzender: Herr Abgeordneter, kommen Sie bitte zur Frage.'). Null if it's a Q&A pair.",
       },
     },
@@ -55,9 +46,6 @@ export async function parseProtocolChunk(
   pageNumber: number,
   startId: number
 ): Promise<ParsedEntry[]> {
-  if (!ai) {
-    throw new Error("GoogleGenAI client not initialized. Check API key configuration.");
-  }
 
   const prompt = `
     **ROLE & GOAL**
@@ -109,8 +97,7 @@ export async function parseProtocolChunk(
     `;
 
   try {
-    // FIX: Updated deprecated model name from gemini-1.5-pro to gemini-2.5-pro.
-    const results = await callGenerativeAIWithCorrection(ai, 'gemini-2.5-pro', prompt, {
+    const results = await callGenerativeAIWithCorrection('gemini-2.5-pro', prompt, {
       responseMimeType: 'application/json',
       responseSchema: parsingSchema,
     });

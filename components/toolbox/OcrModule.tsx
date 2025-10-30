@@ -3,7 +3,6 @@ import { ModuleWrapper } from './ModuleWrapper';
 import { IOField } from './IOField';
 import { extractTextFromPdf } from '../../services/fileService';
 import { getRandomQuote } from '../../utils/quotes';
-import '../../types';
 
 interface OcrModuleProps {
     setLoading: (loading: boolean) => void;

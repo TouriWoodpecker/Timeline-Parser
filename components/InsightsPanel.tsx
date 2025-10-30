@@ -1,8 +1,6 @@
 import React from 'react';
 import type { KeyInsights } from '../types';
 import { renderMarkdown } from '../utils/markdown';
-// FIX: Import types for custom element definitions.
-import '../types';
 
 interface InsightsPanelProps {
   insights: KeyInsights | null;

@@ -1,16 +1,7 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { ParsedEntry, KeyInsights, CorpusItem } from "../types";
 import { callGenerativeAIWithCorrection } from "./aiUtils";
 import { knowledgeCorpus } from './knowledgeCorpus';
 import { createQueryEmbedding, findMostSimilar, createEmbedding } from './embeddingService';
-
-// Initialize the Google AI client
-let ai: GoogleGenAI;
-try {
-  ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-} catch (error)  {
-  console.error("Failed to initialize GoogleGenAI. Make sure API_KEY is set in environment variables.", error);
-}
 
 // Store for corpus embeddings to avoid re-computing
 let corpusEmbeddings: { item: CorpusItem; embedding: number[] }[] | null = null;
@@ -33,25 +24,25 @@ async function getCorpusEmbeddings() {
 }
 
 const chunkAnalysisSchema = {
-    type: Type.ARRAY,
+    type: 'ARRAY',
     description: "An array of analysis results, one for each entry in the input chunk.",
     items: {
-        type: Type.OBJECT,
+        type: 'OBJECT',
         properties: {
             id: {
-                type: Type.NUMBER,
+                type: 'NUMBER',
                 description: "The original ID of the entry being analyzed."
             },
             kernaussage: {
-                type: Type.STRING,
+                type: 'STRING',
                 description: "A concise, one-sentence summary of the core statement or finding from the answer, phrased neutrally. (in German)"
             },
             zugeordneteKategorien: {
-                type: Type.STRING,
+                type: 'STRING',
                 description: "A comma-separated list of the most relevant category IDs (e.g., '1a, 5f, 11b') from the provided knowledge corpus that this entry relates to. (in German)"
             },
             begruendung: {
-                type: Type.STRING,
+                type: 'STRING',
                 description: "A brief, one-to-two sentence explanation of why the selected categories were chosen, linking the entry's content to the corpus descriptions. (in German)"
             }
         },
@@ -64,9 +55,6 @@ const chunkAnalysisSchema = {
  * Analyzes a chunk of parsed entries using the knowledge corpus.
  */
 export async function analyzeEntries(entries: ParsedEntry[]): Promise<ParsedEntry[]> {
-    if (!ai) {
-        throw new Error("GoogleGenAI client not initialized.");
-    }
     if (entries.length === 0) return [];
 
     const combinedTextToAnalyze = entries.map(entry => `ID ${entry.id}: Frage: ${entry.question || 'N/A'}\nAntwort: ${entry.answer || 'N/A'}`).join('\n\n');
@@ -113,7 +101,7 @@ export async function analyzeEntries(entries: ParsedEntry[]): Promise<ParsedEntr
         Your output must be ONLY a valid JSON array of objects, conforming to the schema. The array must contain exactly one object for each entry provided in the input.
     `;
     
-    const results = await callGenerativeAIWithCorrection(ai, 'gemini-2.5-pro', prompt, {
+    const results = await callGenerativeAIWithCorrection('gemini-2.5-pro', prompt, {
         responseMimeType: 'application/json',
         responseSchema: chunkAnalysisSchema,
     });
@@ -136,28 +124,28 @@ export async function analyzeEntries(entries: ParsedEntry[]): Promise<ParsedEntr
 
 
 const insightsSchema = {
-    type: Type.OBJECT,
+    type: 'OBJECT',
     properties: {
         summary: {
-            type: Type.STRING,
+            type: 'STRING',
             description: "A concise, well-structured summary of the key themes and findings from the provided protocol entries. It should be 2-4 paragraphs long and written in German Markdown."
         },
         insights: {
-            type: Type.ARRAY,
+            type: 'ARRAY',
             description: "An array of exactly the top 3 most important or surprising key insights.",
             items: {
-                type: Type.OBJECT,
+                type: 'OBJECT',
                 properties: {
                     title: {
-                        type: Type.STRING,
+                        type: 'STRING',
                         description: "A short, impactful title for the insight (in German)."
                     },
                     description: {
-                        type: Type.STRING,
+                        type: 'STRING',
                         description: "A one-paragraph description of the insight, explaining its significance (in German)."
                     },
                     references: {
-                        type: Type.STRING,
+                        type: 'STRING',
                         description: "A comma-separated list of the 'Fragenummer' (#) that support this insight. For example: '#5, #12, #23'."
                     }
                 },
@@ -174,10 +162,6 @@ const insightsSchema = {
  * @returns A promise that resolves to a KeyInsights object.
  */
 export async function findKeyInsights(data: ParsedEntry[]): Promise<KeyInsights> {
-    if (!ai) {
-        throw new Error("GoogleGenAI client not initialized.");
-    }
-    
     const analyzableData = data.filter(d => d.kernaussage && !d.note);
 
     if (analyzableData.length < 3) {
@@ -234,8 +218,7 @@ export async function findKeyInsights(data: ParsedEntry[]): Promise<KeyInsights>
         Deine endgültige Ausgabe muss ein einziges, gültiges JSON-Objekt sein, das sich strikt an das bereitgestellte Schema hält. Füge keinen Text, keine Erklärungen oder Markdown außerhalb des JSON-Objekts ein.
     `;
 
-    // FIX: Updated deprecated model name from gemini-1.5-pro to gemini-2.5-pro.
-    const result = await callGenerativeAIWithCorrection(ai, 'gemini-2.5-pro', prompt, {
+    const result = await callGenerativeAIWithCorrection('gemini-2.5-pro', prompt, {
         responseMimeType: 'application/json',
         responseSchema: insightsSchema,
     });

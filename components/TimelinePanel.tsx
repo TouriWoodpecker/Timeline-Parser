@@ -1,8 +1,6 @@
 import React from 'react';
 import { DataTable } from './DataTable';
 import type { ParsedEntry } from '../types';
-// FIX: Import types for custom element definitions.
-import '../types';
 
 interface TimelinePanelProps {
   pairedData: ParsedEntry[];

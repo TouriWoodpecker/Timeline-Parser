@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import useLocalStorage from '../hooks/useLocalStorage';
-// FIX: Import types for custom element definitions.
-import '../types';
 
 interface FabMenuProps {
     view: 'app' | 'toolbox';

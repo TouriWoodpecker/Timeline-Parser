@@ -1,5 +1,4 @@
 import React from 'react';
-import '../types';
 
 interface FooterProps {
   view: 'app' | 'toolbox';

@@ -1,7 +1,5 @@
 import React from 'react';
 import { TextInput } from './TextInput';
-// FIX: Import types for custom element definitions.
-import '../types';
 
 interface InputPanelProps {
   inputText: string;

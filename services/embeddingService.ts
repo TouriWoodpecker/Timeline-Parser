@@ -1,13 +1,3 @@
-import { GoogleGenAI } from "@google/genai";
-
-let ai: GoogleGenAI;
-try {
-  ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-} catch (error) {
-  console.error("Failed to initialize GoogleGenAI for embeddings.", error);
-  // We don't throw here to allow the main app to load, but embedding calls will fail.
-}
-
 // Function to calculate the dot product of two vectors
 function dotProduct(vecA: number[], vecB: number[]): number {
     return vecA.reduce((sum, val, i) => sum + val * (vecB[i] || 0), 0);
@@ -30,41 +20,55 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
 }
 
 /**
- * Creates an embedding for a document in the corpus.
+ * Creates an embedding for a document in the corpus via the secure proxy.
  */
 export async function createEmbedding(text: string): Promise<number[]> {
-    if (!ai) {
-        throw new Error("Embedding client not initialized. Check API key.");
-    }
-    // FIX: Use `contents` for single text embedding, which is expected by the user's SDK version.
-    const response = await ai.models.embedContent({
-        model: "text-embedding-004",
-        contents: text,
-        config: {
-            taskType: "RETRIEVAL_DOCUMENT"
-        }
+    const url = '/api/v1/models/text-embedding-004:embedContent';
+    const requestBody = {
+        model: "models/text-embedding-004", // Required by REST API
+        content: { parts: [{ text }] },
+        task_type: "RETRIEVAL_DOCUMENT"
+    };
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
     });
-    // FIX: The response property from `embedContent` in older SDK versions was `embeddings` (an array).
-    return (response as any).embeddings[0].values;
+
+    if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({ message: response.statusText }));
+        throw new Error(`Embedding failed: ${response.status} - ${errorBody.error?.message || 'Unknown error'}`);
+    }
+    
+    const data = await response.json();
+    return data.embedding.values;
 }
 
 /**
- * Creates an embedding for a user query.
+ * Creates an embedding for a user query via the secure proxy.
  */
 export async function createQueryEmbedding(text: string): Promise<number[]> {
-     if (!ai) {
-        throw new Error("Embedding client not initialized. Check API key.");
-    }
-    // FIX: Use `contents` for single text embedding, which is expected by the user's SDK version.
-    const response = await ai.models.embedContent({
-        model: "text-embedding-004",
-        contents: text,
-        config: {
-            taskType: "RETRIEVAL_QUERY"
-        }
+    const url = '/api/v1/models/text-embedding-004:embedContent';
+    const requestBody = {
+        model: "models/text-embedding-004", // Required by REST API
+        content: { parts: [{ text }] },
+        task_type: "RETRIEVAL_QUERY"
+    };
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
     });
-    // FIX: The response property from `embedContent` in older SDK versions was `embeddings` (an array).
-    return (response as any).embeddings[0].values;
+
+    if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({ message: response.statusText }));
+        throw new Error(`Embedding failed: ${response.status} - ${errorBody.error?.message || 'Unknown error'}`);
+    }
+    
+    const data = await response.json();
+    return data.embedding.values;
 }
 
 /**

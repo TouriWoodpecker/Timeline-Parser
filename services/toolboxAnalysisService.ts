@@ -1,17 +1,7 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { ParsedEntry, CorpusItem } from "../types";
 import { callGenerativeAI } from "./aiUtils";
 import { knowledgeCorpus } from './knowledgeCorpus';
 import { createQueryEmbedding, findMostSimilar, createEmbedding } from './embeddingService';
-
-
-// Initialize the Google AI client
-let ai: GoogleGenAI;
-try {
-  ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-} catch (error)  {
-  console.error("Failed to initialize GoogleGenAI. Make sure API_KEY is set in environment variables.", error);
-}
 
 // Store for corpus embeddings to avoid re-computing
 let corpusEmbeddings: { item: CorpusItem; embedding: number[] }[] | null = null;
@@ -35,25 +25,25 @@ async function getCorpusEmbeddings() {
 
 
 const chunkAnalysisSchema = {
-    type: Type.ARRAY,
+    type: 'ARRAY',
     description: "An array of analysis results, one for each entry in the input chunk.",
     items: {
-        type: Type.OBJECT,
+        type: 'OBJECT',
         properties: {
             id: {
-                type: Type.NUMBER,
+                type: 'NUMBER',
                 description: "The original ID of the entry being analyzed."
             },
             kernaussage: {
-                type: Type.STRING,
+                type: 'STRING',
                 description: "Deine prägnante Zusammenfassung der Kernaussage.",
             },
             zugeordneteKategorien: {
-                type: Type.STRING,
+                type: 'STRING',
                 description: "Nummer(n) aus dem Wissenskorpus, z.B. '7(a); 19(b)' ODER 'Irrelevant / Prozedural'.",
             },
             begruendung: {
-                type: Type.STRING,
+                type: 'STRING',
                 description: "Deine kurze Begründung, warum der Inhalt zur Kategorie passt ODER warum er prozedural ist.",
             },
         },
@@ -63,9 +53,6 @@ const chunkAnalysisSchema = {
 
 
 export async function analyzeEntries(entries: ParsedEntry[]): Promise<ParsedEntry[]> {
-    if (!ai) {
-        throw new Error("GoogleGenAI client not initialized. Check API key configuration.");
-    }
     if (entries.length === 0) {
         return [];
     }
@@ -117,7 +104,7 @@ ${entriesToAnalyzeString}
 Dein Output muss ausschließlich ein valides JSON-Array sein. Jedes Objekt im Array repräsentiert einen analysierten Eintrag aus dem Input-Block und muss dem Schema entsprechen. Das Array muss exakt einen Eintrag für jeden Input-Eintrag enthalten.
         `;
 
-        const responseText = await callGenerativeAI(ai, 'gemini-2.5-pro', prompt, {
+        const responseText = await callGenerativeAI('gemini-2.5-pro', prompt, {
             responseMimeType: 'application/json',
             responseSchema: chunkAnalysisSchema,
         });

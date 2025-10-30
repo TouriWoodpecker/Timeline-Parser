@@ -6,7 +6,6 @@ import { getRandomQuote } from '../../utils/quotes';
 import { DataTable } from '../DataTable';
 import { processCsvFile } from '../../services/fileService';
 import { renderMarkdown } from '../../utils/markdown';
-import '../../types';
 
 interface InsightsModuleProps {
     setLoading: (loading: boolean) => void;

@@ -5,7 +5,6 @@ import { analyzeEntries } from '../../services/toolboxAnalysisService';
 import { ParsedEntry } from '../../types';
 import { getRandomQuote } from '../../utils/quotes';
 import { processCsvFile } from '../../services/fileService';
-import '../../types';
 
 interface AnalyzerModuleProps {
     setLoading: (loading: boolean) => void;
