@@ -6,6 +6,7 @@ import { getRandomQuote } from '../../utils/quotes';
 import { ParsedEntry } from '../../types';
 import { exportToCsv } from '../../services/fileService';
 import { DataTable } from '../DataTable';
+import { promisePool } from '../../utils/promisePool';
 
 interface ParserModuleProps {
     setLoading: (loading: boolean) => void;
@@ -48,51 +49,65 @@ export const ParserModule: React.FC<ParserModuleProps> = ({
                 throw new Error("Could not find a protocol ID (e.g., WP_80/06) in the text. The parser requires text from the OCR module to identify the protocol.");
             }
             const protocolId = `WP${protocolMatch[1]}`;
-            setLoadingMessage(`Processing protocol: ${protocolId}...`);
-
+            
             const pageChunks = inputText.split(/==Start of OCR for page (\d+)==/);
             
-            let allParsedEntries: ParsedEntry[] = [];
-            let currentEntryId = 1;
-            const totalPages = pageChunks.length > 1 ? Math.floor((pageChunks.length - 1) / 2) : 0;
-            const warnings: string[] = [];
-
+            const parsingJobs: { textChunk: string, pageNumber: number }[] = [];
             for (let i = 1; i < pageChunks.length; i += 2) {
-                if (stopOperationRef.current) {
-                    break;
-                }
                 const pageNumber = parseInt(pageChunks[i], 10);
                 let textChunk = pageChunks[i + 1] || '';
                 textChunk = textChunk.split(/==End of OCR for page \d+==/)[0];
 
-                if (!textChunk.trim()) continue;
-
-                setLoadingMessage(`Parsing page ${pageNumber} of ${totalPages}...`);
-
-                try {
-                    const parsedEntries = await parseProtocolChunk(textChunk, protocolId, pageNumber, currentEntryId);
-                    allParsedEntries.push(...parsedEntries);
-                    setParsedData([...allParsedEntries]);
-                    currentEntryId += parsedEntries.length;
-                } catch (error) {
-                    console.error(`Skipping page ${pageNumber} due to a critical parsing error.`);
-                    warnings.push(`Warning: Page ${pageNumber} was skipped due to a parsing error.`);
+                if (textChunk.trim()) {
+                    parsingJobs.push({ textChunk, pageNumber });
                 }
             }
-           
+
+            const totalPages = parsingJobs.length;
+            if (totalPages === 0) {
+                setStatusMessage('No pages with text content found to parse.');
+                return;
+            }
+            
+            const CONCURRENCY_LIMIT = 8;
+            setLoadingMessage(`Parsing ${totalPages} pages with a pool of ${CONCURRENCY_LIMIT} workers...`);
+            
+            const parseTask = (job: { textChunk: string; pageNumber: number; }) => 
+                parseProtocolChunk(job.textChunk, protocolId, job.pageNumber, 1);
+
+            const handleProgress = ({ completed, total }: { completed: number, total: number }) => {
+                if (stopOperationRef.current) return;
+                setLoadingMessage(`Parsing page ${completed} of ${total}...`);
+            };
+
+            const resultsArrays = await promisePool(
+                parsingJobs,
+                parseTask,
+                CONCURRENCY_LIMIT,
+                handleProgress
+            );
+            
             if (stopOperationRef.current) {
-                setStatusMessage('Parsing aborted by user.');
-            } else {
-                const finalPageCount = totalPages > 0 ? totalPages : (allParsedEntries.length > 0 ? 1 : 0);
-                let message = `Parsing complete. ${allParsedEntries.length} entries extracted from ${finalPageCount} page(s).`;
-                if (warnings.length > 0) {
-                    message += '\n' + warnings.join('\n');
-                }
-                setStatusMessage(message);
+                setStatusMessage('Operation aborted by user.');
+                return;
             }
+            
+            // Flatten all results and re-assign sequential IDs
+            let allParsedEntries = resultsArrays.flat();
+            allParsedEntries = allParsedEntries.map((entry, index) => ({
+                ...entry,
+                id: index + 1
+            }));
+
+            setParsedData(allParsedEntries);
+           
+            let message = `Parsing complete. ${allParsedEntries.length} entries extracted from ${totalPages} page(s).`;
+            setStatusMessage(message);
 
         } catch (e: any) {
-            setError(e.message);
+             if (!stopOperationRef.current) {
+                setError(e.message);
+            }
         } finally {
             setIsLoading(false);
             setLoading(false);

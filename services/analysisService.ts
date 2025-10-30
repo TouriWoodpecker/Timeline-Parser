@@ -122,7 +122,7 @@ ${fullCorpusContext}
 [ENDE WISSENSKORPUS]
 
 3. Ausführungsregeln
-Input: Du erhältst einen Block von mehreren aufeinanderfolgenden Frage-Antwort-Paaren. Nutze den Kontext der umgebenden Einträge, um jeden einzelnen Eintrag besser zu verstehen.
+Input: Du erhältst einen Block von Frage-Antwort-Paaren, der einen thematisch zusammenhängenden Dialog darstellt (z.B. alle Fragen eines Abgeordneten an einen Zeugen). Nutze den Gesamtkontext des gesamten Blocks, um mehrdeutige Einzel-Einträge korrekt einzuordnen und die Analyse konsistent zu halten.
 Verarbeitung (Dein "Chain of Thought" für JEDEN EINZELNEN Eintrag):
 a. Lies den Eintrag und identifiziere die zentrale(n) Kernaussage(n). Wer (Akteur) tut was (Sachthema)?
 b. Vergleiche den semantischen Inhalt (Akteure und Sachthema) dieser Kernaussage mit den Punkten aus dem WISSENSKORPUS.

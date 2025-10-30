@@ -5,6 +5,7 @@ import { analyzeEntries } from '../../services/analysisService';
 import { ParsedEntry } from '../../types';
 import { getRandomQuote } from '../../utils/quotes';
 import { processCsvFile } from '../../services/fileService';
+import { promisePool } from '../../utils/promisePool';
 
 interface AnalyzerModuleProps {
     setLoading: (loading: boolean) => void;
@@ -41,38 +42,91 @@ export const AnalyzerModule: React.FC<AnalyzerModuleProps> = ({
         setError(null);
         setOutputData([]);
 
-        const dataToAnalyze = inputData.filter(d => d.question && d.answer);
-        let processedCount = 0;
-        const CHUNK_SIZE = 5;
-
-        for (let i = 0; i < dataToAnalyze.length; i += CHUNK_SIZE) {
-            if (stopOperationRef.current) {
-                setStatusMessage(`Analysis stopped by user. ${processedCount} entries were processed.`);
-                break;
-            }
-
-            const chunk = dataToAnalyze.slice(i, i + CHUNK_SIZE);
-
-            setLoadingMessage(`Analyzing entries ${processedCount + 1}-${Math.min(processedCount + chunk.length, dataToAnalyze.length)} of ${dataToAnalyze.length}...`);
-
-            try {
-                const analyzedChunk = await analyzeEntries(chunk);
-                setOutputData(currentData => [...currentData, ...analyzedChunk]);
-            } catch (e: any) {
-                setError(`Analysis failed on a chunk starting with entry ID ${chunk[0].id}: ${e.message}`);
-                break;
-            }
-
-            processedCount += chunk.length;
-        }
+        const dataToAnalyze = inputData.filter(d => (d.question && d.answer) || d.note);
         
-        if (!stopOperationRef.current) {
-          setStatusMessage(`Analysis complete. ${processedCount} entries were processed.`);
-        }
+        try {
+            // --- Thematic Chunking Logic ---
+            const chunks: ParsedEntry[][] = [];
+            if (dataToAnalyze.length > 0) {
+                let currentChunk: ParsedEntry[] = [];
+                let currentQuestioner: string | null = null;
 
-        setIsLoading(false);
-        setLoading(false);
-        setLoadingMessage('');
+                for (const entry of dataToAnalyze) {
+                    // A procedural note always breaks the current conversational flow.
+                    if (entry.note) {
+                        if (currentChunk.length > 0) {
+                            chunks.push(currentChunk);
+                        }
+                        // Give the note its own chunk to provide context, then reset for the next block.
+                        chunks.push([entry]);
+                        currentChunk = [];
+                        currentQuestioner = null;
+                        continue;
+                    }
+                    
+                    // A new questioner starts a new thematic block.
+                    if (entry.questioner && entry.questioner !== currentQuestioner) {
+                        if (currentChunk.length > 0) {
+                            chunks.push(currentChunk);
+                        }
+                        currentChunk = [entry];
+                        currentQuestioner = entry.questioner;
+                    } else {
+                        // Continue the current block if it's the same questioner,
+                        // an answer to the current questioner, or a standalone statement.
+                         currentChunk.push(entry);
+                    }
+                }
+                
+                // Add the last remaining chunk.
+                if (currentChunk.length > 0) {
+                    chunks.push(currentChunk);
+                }
+            }
+            
+            const CONCURRENCY_LIMIT = 4; // Lower limit for expensive AI calls
+            setLoadingMessage(`Analyzing ${dataToAnalyze.length} entries in ${chunks.length} thematic chunks (Pool: ${CONCURRENCY_LIMIT})...`);
+
+            const analyzeTask = (chunk: ParsedEntry[]) => analyzeEntries(chunk);
+
+            const handleProgress = ({ completed, total }: { completed: number, total: number }) => {
+                if (stopOperationRef.current) return;
+                setLoadingMessage(`Analyzing chunk ${completed} of ${total}...`);
+            };
+
+            const analyzedChunks = await promisePool(
+                chunks,
+                analyzeTask,
+                CONCURRENCY_LIMIT,
+                handleProgress
+            );
+            
+             if (stopOperationRef.current) {
+                setStatusMessage('Operation aborted by user.');
+                return;
+            }
+            
+            const fullAnalyzedData = analyzedChunks.flat();
+            
+            // We need to merge the results back into the original inputData order,
+            // as some entries might have been filtered out.
+            const analysisMap = new Map(fullAnalyzedData.map(item => [item.id, item]));
+            const finalOutput = inputData.map(originalEntry => 
+                analysisMap.get(originalEntry.id) || originalEntry
+            );
+            
+            setOutputData(finalOutput);
+            setStatusMessage(`Analysis complete. ${dataToAnalyze.length} entries were processed.`);
+        
+        } catch (e: any) {
+            if (!stopOperationRef.current) {
+                setError(`Analysis failed: ${e.message}`);
+            }
+        } finally {
+            setIsLoading(false);
+            setLoading(false);
+            setLoadingMessage('');
+        }
     };
     
     const handleAbort = () => {

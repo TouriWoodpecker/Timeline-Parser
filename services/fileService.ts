@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import type { ParsedEntry } from '../types';
 import type { MutableRefObject } from 'react';
+import { promisePool } from '../utils/promisePool';
 
 // Let TypeScript know about the globally available libraries from the HTML script tags
 declare const pdfjsLib: any;
@@ -10,6 +11,13 @@ declare namespace Tesseract {
     terminate(): Promise<void>;
   }
   function createWorker(lang: string): Promise<Worker>;
+  
+  interface Scheduler {
+    addWorker(worker: Worker): Promise<string>;
+    addJob(action: 'recognize', image: any): Promise<{ data: { text: string } }>;
+    terminate(): Promise<void>;
+  }
+  function createScheduler(): Scheduler;
 }
 declare const Papa: any;
 
@@ -53,7 +61,7 @@ const applyThreshold = (context: CanvasRenderingContext2D, threshold: number = 1
 
 
 /**
- * Extracts raw text from a PDF file using OCR (Tesseract.js).
+ * Extracts raw text from a PDF file using OCR (Tesseract.js) in parallel.
  * The output is a single string containing all the text from the document,
  * with page markers inserted to provide context for the parser.
  * @param file The PDF file to process.
@@ -72,58 +80,79 @@ export async function extractTextFromPdf(file: File, setLoadingMessage: (msg: st
     });
 
     const arrayBuffer = await readingPromise;
-    let fullText = '';
-    let worker: Tesseract.Worker | null = null;
+    let scheduler: Tesseract.Scheduler | null = null;
 
     try {
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         const numPages = pdf.numPages;
-        
-        setLoadingMessage('Initializing OCR engine...');
-        worker = await Tesseract.createWorker('deu');
 
-        for (let i = 1; i <= numPages; i++) {
-            if (stopSignal.current) {
-                setLoadingMessage('PDF processing aborted by user.');
-                break;
-            }
-            
-            setLoadingMessage(`Rendering page ${i}/${numPages} for OCR...`);
-            
-            const page = await pdf.getPage(i);
+        setLoadingMessage('Initializing OCR engine...');
+        const numWorkers = navigator.hardwareConcurrency || 2;
+        scheduler = Tesseract.createScheduler();
+        const workerPromises = Array.from({ length: numWorkers }, () => 
+            Tesseract.createWorker('deu').then(worker => scheduler!.addWorker(worker))
+        );
+        await Promise.all(workerPromises);
+        setLoadingMessage(`Initialized ${numWorkers} OCR workers for parallel processing.`);
+
+        const pageNumbers = Array.from({ length: numPages }, (_, i) => i + 1);
+        const CONCURRENCY_LIMIT = Math.max(2, numWorkers); // Ensure at least 2 workers
+
+        const processPageTask = async (pageNum: number) => {
+            if (stopSignal.current) return null;
+
+            const page = await pdf.getPage(pageNum);
             const scale = 2.0;
             const viewport = page.getViewport({ scale });
 
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
-            if (!context) {
-                throw new Error("Could not get 2D context from canvas");
-            }
+            if (!context) throw new Error(`Could not get 2D context for page ${pageNum}`);
+            
             canvas.height = viewport.height;
             canvas.width = viewport.width;
-            
-            await page.render({ canvasContext: context, viewport }).promise;
 
-            // --- IMAGE PRE-PROCESSING ---
-            setLoadingMessage(`Preprocessing page ${i}/${numPages} (Grayscale)...`);
+            await page.render({ canvas, canvasContext: context, viewport }).promise;
+
             applyGrayscale(context);
-            
-            setLoadingMessage(`Preprocessing page ${i}/${numPages} (Threshold)...`);
-            applyThreshold(context, 170); 
-            // ---------------------------
+            applyThreshold(context, 170);
 
-            setLoadingMessage(`Performing OCR on page ${i} of ${numPages}...`);
-            const { data: { text } } = await worker.recognize(canvas);
+            const { data: { text } } = await scheduler!.addJob('recognize', canvas);
             
-            fullText += `==Start of OCR for page ${i}==\n${text}\n==End of OCR for page ${i}==\n\n`;
+            return { pageNum, text };
+        };
+        
+        const handleProgress = ({ completed, total }: { completed: number; total: number }) => {
+            if (stopSignal.current) return;
+            setLoadingMessage(`Performing OCR... ${completed}/${total} pages complete.`);
+        };
+
+        const pageResults = await promisePool(
+            pageNumbers,
+            processPageTask,
+            CONCURRENCY_LIMIT,
+            handleProgress
+        );
+        
+        if (stopSignal.current) {
+            setLoadingMessage('PDF processing aborted by user.');
+            return '';
         }
-        return fullText;
+
+        const sortedResults = pageResults
+            .filter((r): r is { pageNum: number, text: string } => r !== null)
+            .sort((a, b) => a.pageNum - b.pageNum);
+            
+        return sortedResults
+            .map(r => `==Start of OCR for page ${r.pageNum}==\n${r.text}\n==End of OCR for page ${r.pageNum}==\n\n`)
+            .join('');
+
     } catch (error) {
         console.error("Error during PDF processing:", error);
         throw new Error(`Failed to process PDF: ${error instanceof Error ? error.message : 'An unknown error occurred'}`);
     } finally {
-        if (worker) {
-            await worker.terminate();
+        if (scheduler) {
+            await scheduler.terminate();
         }
     }
 }
