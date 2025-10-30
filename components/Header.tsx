@@ -1,5 +1,6 @@
 import React, { forwardRef } from 'react';
 import { LogoIcon } from './LogoIcon';
+import { ThemeToggleButton } from './ThemeToggleButton';
 
 interface HeaderProps {
   isVisible: boolean;
@@ -32,7 +33,7 @@ export const Header = forwardRef<HTMLElement, HeaderProps>(({
       pointerEvents: isVisible ? 'auto' : 'none',
       borderBottom: '1px solid var(--md-sys-color-outline-variant)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', width: '100%', boxSizing: 'border-box' }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', width: '100%', boxSizing: 'border-box', gap: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexShrink: 0 }}>
           <LogoIcon style={{ height: '1.75rem', width: '1.75rem' }} />
           <span className="md-typescale-title-large" style={{ whiteSpace: 'nowrap' }}>{title}</span>
@@ -62,6 +63,9 @@ export const Header = forwardRef<HTMLElement, HeaderProps>(({
           }}>
             {message}
           </span>
+        </div>
+        <div style={{ flexShrink: 0 }}>
+            <ThemeToggleButton />
         </div>
       </div>
     </header>

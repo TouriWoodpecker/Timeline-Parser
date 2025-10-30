@@ -1,39 +1,30 @@
-import { useState, useEffect, Dispatch, SetStateAction } from 'react';
+import { useState, useEffect } from 'react';
 
-// FIX: Use imported Dispatch and SetStateAction types directly to resolve "Cannot find namespace 'React'" error.
-function useLocalStorage<T>(key: string, initialValue: T | (() => T)): [T, Dispatch<SetStateAction<T>>] {
-  const [storedValue, setStoredValue] = useState<T>(() => {
-    // Prevent server-side rendering errors
-    if (typeof window === 'undefined') {
-        return initialValue instanceof Function ? initialValue() : initialValue;
-    }
-    try {
-      const item = window.localStorage.getItem(key);
-      if (item) {
-        return JSON.parse(item);
+function getStorageValue<T>(key: string, defaultValue: T): T {
+  // getting stored value
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem(key);
+    if (saved !== null) {
+      try {
+        // Try parsing JSON, but fall back to the raw value if it's not JSON
+        return JSON.parse(saved);
+      } catch (e) {
+        return saved as unknown as T;
       }
-      // If no item, return initialValue (or result of its function call)
-      return initialValue instanceof Function ? initialValue() : initialValue;
-    } catch (error) {
-      console.error(`Error reading localStorage key “${key}”:`, error);
-      return initialValue instanceof Function ? initialValue() : initialValue;
     }
+  }
+  return defaultValue;
+}
+
+export const useLocalStorage = <T,>(key: string, defaultValue: T): [T, React.Dispatch<React.SetStateAction<T>>] => {
+  const [value, setValue] = useState<T>(() => {
+    return getStorageValue(key, defaultValue);
   });
 
   useEffect(() => {
-    // Prevent server-side rendering errors
-    if (typeof window === 'undefined') {
-      return;
-    }
-    try {
-      const valueToStore = storedValue;
-      window.localStorage.setItem(key, JSON.stringify(valueToStore));
-    } catch (error) {
-      console.error(`Error setting localStorage key “${key}”:`, error);
-    }
-  }, [key, storedValue]);
+    // storing value
+    localStorage.setItem(key, JSON.stringify(value));
+  }, [key, value]);
 
-  return [storedValue, setStoredValue];
-}
-
-export default useLocalStorage;
+  return [value, setValue];
+};

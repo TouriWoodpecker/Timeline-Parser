@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { ModuleWrapper } from './ModuleWrapper';
 import { DataTable } from '../DataTable';
-import { analyzeEntries } from '../../services/toolboxAnalysisService';
+import { analyzeEntries } from '../../services/analysisService';
 import { ParsedEntry } from '../../types';
 import { getRandomQuote } from '../../utils/quotes';
 import { processCsvFile } from '../../services/fileService';
