@@ -11,33 +11,49 @@ try {
   console.error("Failed to initialize GoogleGenAI. Make sure API_KEY is set in environment variables.", error);
 }
 
-const analysisSchema = {
-    type: Type.OBJECT,
-    properties: {
-        kernaussage: {
-            type: Type.STRING,
-            description: "Deine prägnante Zusammenfassung der Kernaussage.",
+const chunkAnalysisSchema = {
+    type: Type.ARRAY,
+    description: "An array of analysis results, one for each entry in the input chunk.",
+    items: {
+        type: Type.OBJECT,
+        properties: {
+            id: {
+                type: Type.NUMBER,
+                description: "The original ID of the entry being analyzed."
+            },
+            kernaussage: {
+                type: Type.STRING,
+                description: "Deine prägnante Zusammenfassung der Kernaussage.",
+            },
+            zugeordneteKategorien: {
+                type: Type.STRING,
+                description: "Nummer(n) aus dem Wissenskorpus, z.B. '7(a); 19(b)' ODER 'Irrelevant / Prozedural'.",
+            },
+            begruendung: {
+                type: Type.STRING,
+                description: "Deine kurze Begründung, warum der Inhalt zur Kategorie passt ODER warum er prozedural ist.",
+            },
         },
-        zugeordneteKategorien: {
-            type: Type.STRING,
-            description: "Nummer(n) aus dem Wissenskorpus, z.B. '7(a); 19(b)' ODER 'Irrelevant / Prozedural'.",
-        },
-        begruendung: {
-            type: Type.STRING,
-            description: "Deine kurze Begründung, warum der Inhalt zur Kategorie passt ODER warum er prozedural ist.",
-        },
-    },
-    required: ["kernaussage", "zugeordneteKategorien", "begruendung"],
+        required: ["id", "kernaussage", "zugeordneteKategorien", "begruendung"],
+    }
 };
 
-export async function analyzeEntry(entry: ParsedEntry): Promise<ParsedEntry> {
+
+export async function analyzeEntries(entries: ParsedEntry[]): Promise<ParsedEntry[]> {
     if (!ai) {
         throw new Error("GoogleGenAI client not initialized. Check API key configuration.");
     }
-    // Only analyze entries that have a question and an answer
-    if (!entry.question || !entry.answer) {
-        return entry;
+    if (entries.length === 0) {
+        return [];
     }
+
+    const entriesToAnalyzeString = entries.map(entry => `
+        ---
+        **ID:** ${entry.id}
+        **Frage:** ${entry.question}
+        **Antwort:** ${entry.answer}
+        ---
+    `).join('\n');
 
     try {
         const prompt = `
@@ -135,9 +151,9 @@ Teil 3: Stiftung nach Kriegsbeginn – Auflösung, Rechtsgutachten und politisch
 [ENDE WISSENSKORPUS]
 
 3. Ausführungsregeln
-Input: Du erhältst einen Input-Text (ein Frage-Antwort-Paar).
-Verarbeitung (Dein "Chain of Thought"):
-a. Lies den Input-Text und identifiziere die zentrale(n) Kernaussage(n). Wer (Akteur) tut was (Sachthema)?
+Input: Du erhältst einen Block von mehreren aufeinanderfolgenden Frage-Antwort-Paaren. Nutze den Kontext der umgebenden Einträge, um jeden einzelnen Eintrag besser zu verstehen.
+Verarbeitung (Dein "Chain of Thought" für JEDEN EINZELNEN Eintrag):
+a. Lies den Eintrag und identifiziere die zentrale(n) Kernaussage(n). Wer (Akteur) tut was (Sachthema)?
 b. Vergleiche den semantischen Inhalt (Akteure und Sachthema) dieser Kernaussage mit den Punkten 1-19 des Wissenskorpus.
 c. Finde die spezifische(n) Kategorie(n)-Nummer(n), die den Inhalt beschreiben. (z.B. wenn es sich um "Pegel" und "gelöschte E-Mails" geht, finde "18(a)").
 Sonderfall "Irrelevant / Prozedural":
@@ -145,35 +161,42 @@ Sonderfall "Irrelevant / Prozedural":
 - Sei besonders gründlich bei der Anwendung der Punkte 19, 19 a, 19 b. Wenn es sich nicht um Regierungsvertreter (19 a) handelt oder die Klimastiftung (19 b), oder Fehlende Dokumentation (19), dann fällt generelle Kommunikation nicht unter einen dieser Punkte.
 - Wenn eine Aussage auf eine bereits getätigte Aussage im selben Input-Text basiert ohne etwas substantielles hinzuzufügen, verweise auf die bereits getätigte Einordnung von dir. (Beispielsweise: "s. Fr. / Ant. 170")
 
-**Input-Text zur Analyse:**
-- **Frage:** ${entry.question}
-- **Antwort:** ${entry.answer}
+**Input-Block zur Analyse:**
+${entriesToAnalyzeString}
 
 **Output-Format:**
-Dein Output muss ausschließlich ein valides JSON-Objekt sein, das dem folgenden Schema entspricht. Gib keinen einleitenden oder abschließenden Text, keine Markdown-Formatierung oder Erklärungen aus.
+Dein Output muss ausschließlich ein valides JSON-Array sein. Jedes Objekt im Array repräsentiert einen analysierten Eintrag aus dem Input-Block und muss dem Schema entsprechen. Das Array muss exakt einen Eintrag für jeden Input-Eintrag enthalten.
         `;
 
         // FIX: Updated deprecated model name from gemini-1.5-pro to gemini-2.5-pro.
         const responseText = await callGenerativeAI(ai, 'gemini-2.5-pro', prompt, {
             responseMimeType: 'application/json',
-            responseSchema: analysisSchema,
+            responseSchema: chunkAnalysisSchema,
         });
 
         const cleanedJsonString = responseText.replace(/^```json\s*|```\s*$/g, '');
-        const analysisResult = JSON.parse(cleanedJsonString);
+        const analysisResults = JSON.parse(cleanedJsonString);
 
-        return {
-            ...entry,
-            kernaussage: analysisResult.kernaussage,
-            zugeordneteKategorien: analysisResult.zugeordneteKategorien,
-            begruendung: analysisResult.begruendung,
-        };
+        const updatedEntries = entries.map(originalEntry => {
+            const analysisResult = analysisResults.find((r: any) => r.id === originalEntry.id);
+            if (analysisResult) {
+                return {
+                    ...originalEntry,
+                    kernaussage: analysisResult.kernaussage,
+                    zugeordneteKategorien: analysisResult.zugeordneteKategorien,
+                    begruendung: analysisResult.begruendung,
+                };
+            }
+            return {
+                ...originalEntry,
+                kernaussage: "Error: No analysis result returned for this ID from the model.",
+            };
+        });
+
+        return updatedEntries;
+
     } catch (error) {
-        console.error(`Error analyzing entry ID ${entry.id}:`, error);
-        // Return original entry but with an error message in one of the fields for user feedback.
-        return {
-            ...entry,
-            kernaussage: `Error during analysis: ${error instanceof Error ? error.message : String(error)}`,
-        };
+        console.error(`Error analyzing chunk starting with ID ${entries[0]?.id}:`, error);
+        throw new Error(`Failed to analyze chunk: ${error instanceof Error ? error.message : String(error)}`);
     }
 }

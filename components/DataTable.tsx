@@ -33,7 +33,13 @@ export const DataTable: React.FC<DataTableProps> = ({ data }) => {
   const hasAnalysisData = data.some(d => d.kernaussage || d.zugeordneteKategorien || d.begruendung);
 
   return (
-    <div style={{ overflowX: 'auto', border: '1px solid var(--md-sys-color-outline-variant)', borderRadius: '8px' }}>
+    <div style={{
+      overflowX: 'auto',
+      overflowY: 'auto',
+      maxHeight: '60vh',
+      border: '1px solid var(--md-sys-color-outline-variant)',
+      borderRadius: '8px'
+    }}>
       <table style={tableStyle}>
         <thead style={{ backgroundColor: 'var(--md-sys-color-surface)' }}>
           <tr>

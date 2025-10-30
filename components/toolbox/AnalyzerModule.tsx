@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { ModuleWrapper } from './ModuleWrapper';
 import { DataTable } from '../DataTable';
-import { analyzeEntry } from '../../services/toolboxAnalysisService';
+import { analyzeEntries } from '../../services/toolboxAnalysisService';
 import { ParsedEntry } from '../../types';
 import { getRandomQuote } from '../../utils/quotes';
 import { processCsvFile } from '../../services/fileService';
@@ -44,24 +44,27 @@ export const AnalyzerModule: React.FC<AnalyzerModuleProps> = ({
 
         const dataToAnalyze = inputData.filter(d => d.question && d.answer);
         let processedCount = 0;
+        const CHUNK_SIZE = 5;
 
-        for (const entry of dataToAnalyze) {
+        for (let i = 0; i < dataToAnalyze.length; i += CHUNK_SIZE) {
             if (stopOperationRef.current) {
                 setStatusMessage(`Analysis stopped by user. ${processedCount} entries were processed.`);
                 break;
             }
-            
-            processedCount++;
-            setLoadingMessage(`Analyzing entry ${processedCount} of ${dataToAnalyze.length}...`);
+
+            const chunk = dataToAnalyze.slice(i, i + CHUNK_SIZE);
+
+            setLoadingMessage(`Analyzing entries ${processedCount + 1}-${Math.min(processedCount + chunk.length, dataToAnalyze.length)} of ${dataToAnalyze.length}...`);
 
             try {
-                const analyzedEntry = await analyzeEntry(entry);
-                setOutputData(currentData => [...currentData, analyzedEntry]);
+                const analyzedChunk = await analyzeEntries(chunk);
+                setOutputData(currentData => [...currentData, ...analyzedChunk]);
             } catch (e: any) {
-                setError(`Analysis failed on entry ID ${entry.id}: ${e.message}`);
-                // Stop the entire process on a critical failure
+                setError(`Analysis failed on a chunk starting with entry ID ${chunk[0].id}: ${e.message}`);
                 break;
             }
+
+            processedCount += chunk.length;
         }
         
         if (!stopOperationRef.current) {

@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 
 // Import services
 import { parseProtocolChunk } from './services/parsingService';
-import { analyzeEntry, findKeyInsights } from './services/analysisService';
+import { analyzeEntries, findKeyInsights } from './services/analysisService';
 import { extractTextFromPdf, processCsvFile, exportToCsv, exportToXlsx } from './services/fileService';
 
 // Import types
@@ -265,25 +265,32 @@ function App() {
     }
     
     let processedCount = 0;
+    const CHUNK_SIZE = 5;
 
-    for (const entry of pairedData) {
+    for (let i = 0; i < dataToAnalyze.length; i += CHUNK_SIZE) {
         if (stopOperationRef.current) {
             setStatusMessage(`Analysis stopped by user. ${processedCount} entries were processed.`);
             break;
         }
         
-        if (!entry.question || !entry.answer || entry.kernaussage) {
-            continue;
-        }
+        const chunk = dataToAnalyze.slice(i, i + CHUNK_SIZE);
         
-        processedCount++;
-        setLoadingMessage(`Analyzing entry ${processedCount} of ${dataToAnalyze.length}...`);
+        setLoadingMessage(`Analyzing entries ${processedCount + 1}-${Math.min(processedCount + chunk.length, dataToAnalyze.length)} of ${dataToAnalyze.length}...`);
 
-        const analyzedEntry = await analyzeEntry(entry);
+        try {
+            const analyzedChunk = await analyzeEntries(chunk);
 
-        setPairedData(currentData =>
-            currentData.map(d => d.id === analyzedEntry.id ? analyzedEntry : d)
-        );
+            const analyzedMap = new Map(analyzedChunk.map(entry => [entry.id, entry]));
+            
+            setPairedData(currentData =>
+                currentData.map(d => analyzedMap.get(d.id) || d)
+            );
+            
+            processedCount += chunk.length;
+        } catch (e: any) {
+            setError(`Analysis failed on a chunk starting with entry ID ${chunk[0].id}: ${e.message}`);
+            break;
+        }
     }
     
     if (!stopOperationRef.current) {

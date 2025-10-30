@@ -64,7 +64,11 @@ export const IOField: React.FC<IOFieldProps> = ({
                 id={label.replace(' ', '-').toLowerCase()}
                 type="textarea"
                 rows={rows}
-                style={{ width: '100%' }}
+                style={{
+                    width: '100%',
+                    maxHeight: '40vh',
+                    resize: 'vertical'
+                }}
                 value={value}
                 onInput={(e: any) => onValueChange(e.target.value)}
                 disabled={disabled}

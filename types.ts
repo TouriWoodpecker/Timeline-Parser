@@ -5,6 +5,9 @@ import React from 'react';
 declare global {
   // FIX: Changed namespace from React to JSX to match what TypeScript's JSX factory expects.
   namespace JSX {
+    // FIX: Correctly augmented IntrinsicElements for custom components.
+    // The previous `extends React.JSX.IntrinsicElements` was causing standard HTML elements
+    // to be unrecognized. Removing it allows TypeScript's declaration merging to work as expected.
     interface IntrinsicElements {
       'md-circular-progress': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { indeterminate?: boolean; 'aria-label'?: string; }, HTMLElement>;
       'md-linear-progress': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & { indeterminate?: boolean; }, HTMLElement>;
