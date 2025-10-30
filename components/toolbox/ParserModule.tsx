@@ -1,199 +1,124 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import { ModuleWrapper } from './ModuleWrapper';
 import { IOField } from './IOField';
-import { parseProtocolChunk } from '../../services/parsingService';
-import { getRandomQuote } from '../../utils/quotes';
-import { ParsedEntry } from '../../types';
-import { exportToCsv } from '../../services/fileService';
 import { DataTable } from '../DataTable';
-import { promisePool } from '../../utils/promisePool';
+import { parseProtocolChunk } from '../../services/parsingService';
+import { exportToCsv, exportToXlsx } from '../../services/fileService';
+import type { ParsedEntry } from '../../types';
 
 interface ParserModuleProps {
-    setLoading: (loading: boolean) => void;
-    setLoadingMessage: (message: string) => void;
-    setStatusMessage: (message: string) => void;
-    setError: (error: string | null) => void;
+    rawText: string;
+    setRawText: (text: string) => void;
+    parsedData: ParsedEntry[];
+    setParsedData: (data: ParsedEntry[]) => void;
+    setLoading: (loading: boolean, message?: string) => void;
+    onParsingComplete: (data: ParsedEntry[]) => void;
 }
 
-
 export const ParserModule: React.FC<ParserModuleProps> = ({
+    rawText,
+    setRawText,
+    parsedData,
+    setParsedData,
     setLoading,
-    setLoadingMessage,
-    setStatusMessage,
-    setError
+    onParsingComplete
 }) => {
-    const [inputText, setInputText] = useState('');
-    const [parsedData, setParsedData] = useState<ParsedEntry[]>([]);
-    const [placeholder] = useState(getRandomQuote());
-    const [copyIcon, setCopyIcon] = useState('content_copy');
-    const [isLoading, setIsLoading] = useState(false); // Local state for button disable
-    
-    const stopOperationRef = useRef(false);
+    const [error, setError] = useState<string>('');
+    const [protocolId, setProtocolId] = useState('WP7/9');
 
-    const handleParse = async () => {
-        if (!inputText.trim()) {
-            setError("Please provide the text from the OCR module.");
+    const handleParse = useCallback(async () => {
+        if (!rawText.trim()) {
+            setError("Input text is empty. Please provide text from the OCR module or paste it here.");
             return;
         }
-
-        setIsLoading(true);
-        setLoading(true);
-        stopOperationRef.current = false;
-        setError(null);
+        setError('');
         setParsedData([]);
-        setStatusMessage('');
 
         try {
-            const protocolMatch = inputText.match(/WP_(\d+)\/\d+/);
-            if (!protocolMatch) {
-                throw new Error("Could not find a protocol ID (e.g., WP_80/06) in the text. The parser requires text from the OCR module to identify the protocol.");
-            }
-            const protocolId = `WP${protocolMatch[1]}`;
+            setLoading(true, 'Parsing text into structured data...');
             
-            const pageChunks = inputText.split(/==Start of OCR for page (\d+)==/);
+            const pageChunks = rawText.split(/==End of OCR for page \d+==/);
+            const pageRegex = /==Start of OCR for page (\d+)==/;
             
-            const parsingJobs: { textChunk: string, pageNumber: number }[] = [];
-            for (let i = 1; i < pageChunks.length; i += 2) {
-                const pageNumber = parseInt(pageChunks[i], 10);
-                let textChunk = pageChunks[i + 1] || '';
-                textChunk = textChunk.split(/==End of OCR for page \d+==/)[0];
+            let allParsedEntries: ParsedEntry[] = [];
+            let currentId = 1;
 
-                if (textChunk.trim()) {
-                    parsingJobs.push({ textChunk, pageNumber });
+            for (const chunk of pageChunks) {
+                if (chunk.trim()) {
+                    const match = chunk.match(pageRegex);
+                    const pageNum = match ? parseInt(match[1], 10) : 1;
+                    
+                    const cleanedChunk = chunk.replace(pageRegex, '').trim();
+                    if (cleanedChunk) {
+                        const parsedChunk = await parseProtocolChunk(cleanedChunk, protocolId, pageNum, currentId);
+                        allParsedEntries = [...allParsedEntries, ...parsedChunk];
+                        currentId = allParsedEntries.length + 1;
+                    }
                 }
             }
-
-            const totalPages = parsingJobs.length;
-            if (totalPages === 0) {
-                setStatusMessage('No pages with text content found to parse.');
-                return;
-            }
             
-            const CONCURRENCY_LIMIT = 8;
-            setLoadingMessage(`Parsing ${totalPages} pages with a pool of ${CONCURRENCY_LIMIT} workers...`);
-            
-            const parseTask = (job: { textChunk: string; pageNumber: number; }) => 
-                parseProtocolChunk(job.textChunk, protocolId, job.pageNumber, 1);
-
-            const handleProgress = ({ completed, total }: { completed: number, total: number }) => {
-                if (stopOperationRef.current) return;
-                setLoadingMessage(`Parsing page ${completed} of ${total}...`);
-            };
-
-            const resultsArrays = await promisePool(
-                parsingJobs,
-                parseTask,
-                CONCURRENCY_LIMIT,
-                handleProgress
-            );
-            
-            if (stopOperationRef.current) {
-                setStatusMessage('Operation aborted by user.');
-                return;
-            }
-            
-            // Flatten all results and re-assign sequential IDs
-            let allParsedEntries = resultsArrays.flat();
-            allParsedEntries = allParsedEntries.map((entry, index) => ({
-                ...entry,
-                id: index + 1
-            }));
-
             setParsedData(allParsedEntries);
-           
-            let message = `Parsing complete. ${allParsedEntries.length} entries extracted from ${totalPages} page(s).`;
-            setStatusMessage(message);
+            onParsingComplete(allParsedEntries);
 
-        } catch (e: any) {
-             if (!stopOperationRef.current) {
-                setError(e.message);
-            }
+        } catch (err: any) {
+            setError(`Parsing failed: ${err.message}`);
+            console.error(err);
         } finally {
-            setIsLoading(false);
             setLoading(false);
-            setLoadingMessage('');
         }
-    };
-    
-    const handleAbort = () => {
-        stopOperationRef.current = true;
-    };
+    }, [rawText, protocolId, setLoading, setParsedData, onParsingComplete]);
 
-    const handleExportCsv = () => {
-        if (parsedData.length > 0) {
-            const protocolMatch = inputText.match(/WP_(\d+)\/\d+/);
-            const protocolId = protocolMatch ? `WP${protocolMatch[1]}` : 'parsed-protocol';
-            exportToCsv(parsedData, `${protocolId}-parsed-${new Date().toISOString().slice(0,10)}.csv`);
-            setStatusMessage('Exported to CSV.');
-        }
-    };
-    
-    const handleCopyJson = () => {
-        if (parsedData.length > 0) {
-            navigator.clipboard.writeText(JSON.stringify(parsedData, null, 2));
-            setCopyIcon('check');
-            setTimeout(() => setCopyIcon('content_copy'), 2000);
-            setStatusMessage('Copied JSON to clipboard.');
-        }
-    };
-
-    const hasData = parsedData.length > 0;
+    const handleClear = useCallback(() => {
+        setRawText('');
+        setParsedData([]);
+        setError('');
+    }, [setRawText, setParsedData]);
 
     return (
         <ModuleWrapper
             title="Parser"
-            description="Paste raw text from the OCR module. The AI will automatically detect pages and structure the content into a data table."
+            description="Structure the raw protocol text into a clear, tabular format by identifying speakers, questions, answers, and procedural notes."
         >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
+                <md-outlined-text-field
+                    label="Protocol ID"
+                    value={protocolId}
+                    onInput={(e: any) => setProtocolId(e.target.value)}
+                    style={{ minWidth: '150px' }}
+                />
+                <md-filled-button onClick={handleParse} disabled={!rawText}>
+                    <span className="material-symbols-outlined" style={{ marginRight: '8px' }}>mediation</span>
+                    Parse Text
+                </md-filled-button>
+            </div>
             <IOField
-                label="Input Text"
-                value={inputText}
-                onValueChange={setInputText}
-                placeholder={placeholder}
-                rows={10}
-                disabled={isLoading}
+                label="Raw Text Input"
+                value={rawText}
+                onValueChange={setRawText}
+                placeholder="Paste raw text here or use output from the OCR module."
                 showClear
-                onClear={() => setInputText('')}
+                onClear={handleClear}
             />
+            {error && <div style={{ color: 'var(--md-sys-color-error)' }}>{error}</div>}
             
-            <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                 <md-filled-icon-button onClick={handleParse} disabled={isLoading || !inputText.trim()} title="Parse Text">
-                    <span className="material-symbols-outlined">mediation</span>
-                </md-filled-icon-button>
-                {isLoading && (
-                    <md-outlined-button onClick={handleAbort}>
-                        <span className="material-symbols-outlined" slot="icon">cancel</span>
-                        Abort
-                    </md-outlined-button>
-                )}
-            </div>
-
-            <div style={{marginTop: '24px'}}>
-                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                    <h3 className="md-typescale-title-medium">Output</h3>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                        <md-icon-button onClick={handleCopyJson} disabled={!hasData || isLoading} title="Copy as JSON">
-                            <span className="material-symbols-outlined">{copyIcon}</span>
-                        </md-icon-button>
-                        <md-icon-button onClick={handleExportCsv} disabled={!hasData || isLoading} title="Export CSV">
-                            <span className="material-symbols-outlined">download</span>
-                        </md-icon-button>
+            {parsedData.length > 0 && (
+                <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                        <h3 className="md-typescale-title-medium">Parsed Protocol</h3>
+                         <div style={{display: 'flex', gap: '8px'}}>
+                            <md-filled-tonal-button onClick={() => exportToCsv(parsedData, 'parsed-protocol.csv')}>
+                                 <span className="material-symbols-outlined" style={{ marginRight: '8px' }}>download</span>
+                                CSV
+                            </md-filled-tonal-button>
+                            <md-filled-tonal-button onClick={() => exportToXlsx(parsedData, 'parsed-protocol.xlsx')}>
+                                 <span className="material-symbols-outlined" style={{ marginRight: '8px' }}>download</span>
+                                XLSX
+                            </md-filled-tonal-button>
+                         </div>
                     </div>
-                </div>
-                 {hasData ? (
                     <DataTable data={parsedData} />
-                ) : (
-                     <div style={{
-                      padding: '48px 24px',
-                      textAlign: 'center',
-                      border: '1px dashed var(--md-sys-color-outline-variant)',
-                      borderRadius: '8px'
-                    }}>
-                      <span className="material-symbols-outlined" style={{fontSize: '48px', color: 'var(--md-sys-color-surface-variant)'}}>hub</span>
-                      <h3 className="md-typescale-title-medium" style={{marginTop: '16px'}}>Parsed Data Will Appear Here</h3>
-                      <p className="md-typescale-body-medium" style={{color: 'var(--md-sys-color-on-surface-variant)'}}>{placeholder}</p>
-                    </div>
-                )}
-            </div>
+                </div>
+            )}
         </ModuleWrapper>
     );
 };

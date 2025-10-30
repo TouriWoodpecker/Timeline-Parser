@@ -14,7 +14,7 @@ export const Header = forwardRef<HTMLElement, HeaderProps>(({
   isLoading, 
 }, ref) => {
   
-  const title = "IPEA";
+  const title = "pea I";
 
   return (
     <header ref={ref} style={{

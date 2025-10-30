@@ -61,7 +61,9 @@ const applyThreshold = (context: CanvasRenderingContext2D, threshold: number = 1
 
 
 /**
- * Extracts raw text from a PDF file using OCR (Tesseract.js) in parallel.
+ * Extracts raw text from a PDF file using a hybrid approach.
+ * First, it attempts to extract the text layer directly for speed. If a page
+ * has no usable text layer, it falls back to OCR (Tesseract.js).
  * The output is a single string containing all the text from the document,
  * with page markers inserted to provide context for the parser.
  * @param file The PDF file to process.
@@ -86,22 +88,33 @@ export async function extractTextFromPdf(file: File, setLoadingMessage: (msg: st
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         const numPages = pdf.numPages;
 
-        setLoadingMessage('Initializing OCR engine...');
+        setLoadingMessage('Initializing OCR engine for fallback...');
         const numWorkers = navigator.hardwareConcurrency || 2;
         scheduler = Tesseract.createScheduler();
         const workerPromises = Array.from({ length: numWorkers }, () => 
             Tesseract.createWorker('deu').then(worker => scheduler!.addWorker(worker))
         );
         await Promise.all(workerPromises);
-        setLoadingMessage(`Initialized ${numWorkers} OCR workers for parallel processing.`);
+        setLoadingMessage(`Initialized OCR engine. Processing ${numPages} pages...`);
 
         const pageNumbers = Array.from({ length: numPages }, (_, i) => i + 1);
-        const CONCURRENCY_LIMIT = Math.max(2, numWorkers); // Ensure at least 2 workers
+        const CONCURRENCY_LIMIT = Math.max(2, numWorkers);
 
         const processPageTask = async (pageNum: number) => {
             if (stopSignal.current) return null;
 
             const page = await pdf.getPage(pageNum);
+            
+            // --- FAST PATH: Attempt direct text extraction ---
+            const textContent = await page.getTextContent();
+            const directText = textContent.items.map((item: any) => item.str).join(' ');
+
+            // If we get a decent amount of text, use it and skip OCR.
+            if (directText.trim().length > 20) { // Threshold for "meaningful" text
+                return { pageNum, text: directText };
+            }
+
+            // --- SLOW PATH (FALLBACK): OCR ---
             const scale = 2.0;
             const viewport = page.getViewport({ scale });
 
@@ -117,14 +130,14 @@ export async function extractTextFromPdf(file: File, setLoadingMessage: (msg: st
             applyGrayscale(context);
             applyThreshold(context, 170);
 
-            const { data: { text } } = await scheduler!.addJob('recognize', canvas);
+            const { data: { text: ocrText } } = await scheduler!.addJob('recognize', canvas);
             
-            return { pageNum, text };
+            return { pageNum, text: ocrText };
         };
         
         const handleProgress = ({ completed, total }: { completed: number; total: number }) => {
             if (stopSignal.current) return;
-            setLoadingMessage(`Performing OCR... ${completed}/${total} pages complete.`);
+            setLoadingMessage(`Processing PDF... ${completed}/${total} pages complete.`);
         };
 
         const pageResults = await promisePool(

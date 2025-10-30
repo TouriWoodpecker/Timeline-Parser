@@ -52,7 +52,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectModule }) => {
             gap: '32px'
         }}>
             <div>
-                <h1 className="md-typescale-display-small" style={{ margin: 0 }}>IPEA</h1>
+                <h1 className="md-typescale-display-small" style={{ margin: 0 }}>pea I</h1>
                 <p className="md-typescale-title-medium" style={{ margin: '8px 0 0 0', color: 'var(--md-sys-color-on-surface-variant)' }}>
                     Insights, Parsing, Extracting, Analyzing
                 </p>

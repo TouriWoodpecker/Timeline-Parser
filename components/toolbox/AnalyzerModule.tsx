@@ -1,263 +1,118 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import { ModuleWrapper } from './ModuleWrapper';
 import { DataTable } from '../DataTable';
 import { analyzeEntries } from '../../services/analysisService';
+import { exportToCsv, exportToXlsx } from '../../services/fileService';
 import { ParsedEntry } from '../../types';
-import { getRandomQuote } from '../../utils/quotes';
-import { processCsvFile } from '../../services/fileService';
 import { promisePool } from '../../utils/promisePool';
 
 interface AnalyzerModuleProps {
-    setLoading: (loading: boolean) => void;
-    setLoadingMessage: (message: string) => void;
-    setStatusMessage: (message: string) => void;
-    setError: (error: string | null) => void;
+    parsedData: ParsedEntry[];
+    analyzedData: ParsedEntry[];
+    setAnalyzedData: (data: ParsedEntry[]) => void;
+    setLoading: (loading: boolean, message?: string) => void;
+    onAnalysisComplete: (data: ParsedEntry[]) => void;
 }
 
-export const AnalyzerModule: React.FC<AnalyzerModuleProps> = ({
-    setLoading,
-    setLoadingMessage,
-    setStatusMessage,
-    setError,
-}) => {
-    const [inputData, setInputData] = useState<ParsedEntry[]>([]);
-    const [outputData, setOutputData] = useState<ParsedEntry[]>([]);
-    const [placeholder] = useState(getRandomQuote());
-    const [isLoading, setIsLoading] = useState(false);
-    const [inputCopyIcon, setInputCopyIcon] = useState('content_copy');
-    const [outputCopyIcon, setOutputCopyIcon] = useState('content_copy');
-    
-    const csvInputRef = useRef<HTMLInputElement>(null);
-    const stopOperationRef = useRef(false);
+const CHUNK_SIZE = 15;
 
-    const handleAnalyze = async () => {
-        if (inputData.length === 0) {
-            setError("Please import entries to analyze.");
+export const AnalyzerModule: React.FC<AnalyzerModuleProps> = ({
+    parsedData,
+    analyzedData,
+    setAnalyzedData,
+    setLoading,
+    onAnalysisComplete
+}) => {
+    const [error, setError] = useState<string>('');
+    const dataToDisplay = analyzedData.length > 0 ? analyzedData : parsedData;
+    
+    const handleAnalyze = useCallback(async () => {
+        if (parsedData.length === 0) {
+            setError("No parsed data available to analyze. Please parse a document first.");
             return;
         }
+        setError('');
+        setAnalyzedData([]);
 
-        setIsLoading(true);
-        setLoading(true);
-        stopOperationRef.current = false;
-        setError(null);
-        setOutputData([]);
-
-        const dataToAnalyze = inputData.filter(d => (d.question && d.answer) || d.note);
-        
         try {
-            // --- Thematic Chunking Logic ---
+            const entriesToAnalyze = parsedData.filter(entry => !entry.note && (entry.question || entry.answer));
+            const noteEntries = parsedData.filter(entry => entry.note);
+            
             const chunks: ParsedEntry[][] = [];
-            if (dataToAnalyze.length > 0) {
-                let currentChunk: ParsedEntry[] = [];
-                let currentQuestioner: string | null = null;
-
-                for (const entry of dataToAnalyze) {
-                    // A procedural note always breaks the current conversational flow.
-                    if (entry.note) {
-                        if (currentChunk.length > 0) {
-                            chunks.push(currentChunk);
-                        }
-                        // Give the note its own chunk to provide context, then reset for the next block.
-                        chunks.push([entry]);
-                        currentChunk = [];
-                        currentQuestioner = null;
-                        continue;
-                    }
-                    
-                    // A new questioner starts a new thematic block.
-                    if (entry.questioner && entry.questioner !== currentQuestioner) {
-                        if (currentChunk.length > 0) {
-                            chunks.push(currentChunk);
-                        }
-                        currentChunk = [entry];
-                        currentQuestioner = entry.questioner;
-                    } else {
-                        // Continue the current block if it's the same questioner,
-                        // an answer to the current questioner, or a standalone statement.
-                         currentChunk.push(entry);
-                    }
-                }
-                
-                // Add the last remaining chunk.
-                if (currentChunk.length > 0) {
-                    chunks.push(currentChunk);
-                }
+            for (let i = 0; i < entriesToAnalyze.length; i += CHUNK_SIZE) {
+                chunks.push(entriesToAnalyze.slice(i, i + CHUNK_SIZE));
             }
             
-            const CONCURRENCY_LIMIT = 4; // Lower limit for expensive AI calls
-            setLoadingMessage(`Analyzing ${dataToAnalyze.length} entries in ${chunks.length} thematic chunks (Pool: ${CONCURRENCY_LIMIT})...`);
+            const totalChunks = chunks.length;
 
-            const analyzeTask = (chunk: ParsedEntry[]) => analyzeEntries(chunk);
-
-            const handleProgress = ({ completed, total }: { completed: number, total: number }) => {
-                if (stopOperationRef.current) return;
-                setLoadingMessage(`Analyzing chunk ${completed} of ${total}...`);
+            const analysisTask = (chunk: ParsedEntry[], index: number) => {
+                return analyzeEntries(chunk);
             };
+
+            const handleProgress = ({ completed, total }: { completed: number; total: number }) => {
+                setLoading(true, `Analyzing... ${completed}/${total} chunks complete.`);
+            };
+            
+            setLoading(true, `Starting analysis of ${totalChunks} chunks...`);
 
             const analyzedChunks = await promisePool(
                 chunks,
-                analyzeTask,
-                CONCURRENCY_LIMIT,
+                analysisTask,
+                2, // Concurrency limit
                 handleProgress
             );
+
+            const flattenedAnalyzedData = analyzedChunks.flat();
             
-             if (stopOperationRef.current) {
-                setStatusMessage('Operation aborted by user.');
-                return;
-            }
-            
-            const fullAnalyzedData = analyzedChunks.flat();
-            
-            // We need to merge the results back into the original inputData order,
-            // as some entries might have been filtered out.
-            const analysisMap = new Map(fullAnalyzedData.map(item => [item.id, item]));
-            const finalOutput = inputData.map(originalEntry => 
-                analysisMap.get(originalEntry.id) || originalEntry
-            );
-            
-            setOutputData(finalOutput);
-            setStatusMessage(`Analysis complete. ${dataToAnalyze.length} entries were processed.`);
-        
-        } catch (e: any) {
-            if (!stopOperationRef.current) {
-                setError(`Analysis failed: ${e.message}`);
-            }
+            const combinedData = [...flattenedAnalyzedData, ...noteEntries].sort((a, b) => a.id - b.id);
+
+            setAnalyzedData(combinedData);
+            onAnalysisComplete(combinedData);
+
+        } catch (err: any) {
+            setError(`Analysis failed: ${err.message}`);
+            console.error(err);
         } finally {
-            setIsLoading(false);
             setLoading(false);
-            setLoadingMessage('');
         }
-    };
-    
-    const handleAbort = () => {
-        stopOperationRef.current = true;
-    };
 
-    const handleImportCsv = async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-        
-        setInputData([]);
-        setOutputData([]);
-
-        try {
-            const { data, warnings } = await processCsvFile(file);
-            if (data.length > 0) {
-                setInputData(data);
-                let message = `Successfully imported ${data.length} entries from ${file.name}.`;
-                if (warnings.length > 0) {
-                    message += `\n\nWarnings:\n- ${warnings.join('\n- ')}`;
-                }
-                setStatusMessage(message);
-                setError(null);
-            } else {
-                setError("The imported CSV file is empty or contains no valid data entries.");
-            }
-        } catch (e: any) {
-            setError(`Failed to import CSV: ${e.message}`);
-        }
-        if (event.target) {
-            event.target.value = ''; // Reset file input
-        }
-    };
-
-    const triggerCsvUpload = () => csvInputRef.current?.click();
-    
-    const handleCopy = (data: ParsedEntry[], setIcon: React.Dispatch<React.SetStateAction<string>>) => {
-        if (data.length > 0) {
-            navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-            setIcon('check');
-            setTimeout(() => setIcon('content_copy'), 2000);
-        }
-    };
+    }, [parsedData, setLoading, setAnalyzedData, onAnalysisComplete]);
 
     return (
         <ModuleWrapper
-            title="Analyze"
-            description="Import a CSV file with protocol entries. The AI will analyze each entry against the classic knowledge corpus, adding a core statement, categories, and justification."
+            title="Analyzer"
+            description="Enrich the protocol data by identifying the core statement of each entry and categorizing it against a predefined knowledge corpus."
         >
-            <input
-                type="file"
-                ref={csvInputRef}
-                onChange={handleImportCsv}
-                style={{ display: 'none' }}
-                accept=".csv"
-            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <md-filled-button onClick={handleAnalyze} disabled={parsedData.length === 0}>
+                    <span className="material-symbols-outlined" style={{ marginRight: '8px' }}>science</span>
+                    Analyze Entries
+                </md-filled-button>
+            </div>
+            {error && <div style={{ color: 'var(--md-sys-color-error)' }}>{error}</div>}
 
-            {/* Input Section */}
-            <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                    <h3 className="md-typescale-title-medium">Input Entries</h3>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <md-icon-button onClick={triggerCsvUpload} disabled={isLoading} title="Import Entries from CSV">
-                            <span className="material-symbols-outlined">upload</span>
-                        </md-icon-button>
-                        <md-icon-button onClick={() => handleCopy(inputData, setInputCopyIcon)} disabled={inputData.length === 0 || isLoading} title="Copy as JSON">
-                            <span className="material-symbols-outlined">{inputCopyIcon}</span>
-                        </md-icon-button>
-                        <md-icon-button onClick={() => setInputData([])} disabled={inputData.length === 0 || isLoading} title="Clear Input">
-                            <span className="material-symbols-outlined">delete_sweep</span>
-                        </md-icon-button>
+            {dataToDisplay.length > 0 && (
+                <div>
+                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                        <h3 className="md-typescale-title-medium">Analyzed Protocol</h3>
+                         <div style={{display: 'flex', gap: '8px'}}>
+                            <md-filled-tonal-button onClick={() => exportToCsv(dataToDisplay, 'analyzed-protocol.csv')}>
+                                 <span className="material-symbols-outlined" style={{ marginRight: '8px' }}>download</span>
+                                CSV
+                            </md-filled-tonal-button>
+                            <md-filled-tonal-button onClick={() => exportToXlsx(dataToDisplay, 'analyzed-protocol.xlsx')}>
+                                 <span className="material-symbols-outlined" style={{ marginRight: '8px' }}>download</span>
+                                XLSX
+                            </md-filled-tonal-button>
+                         </div>
                     </div>
+                    <DataTable data={dataToDisplay} />
                 </div>
-                {inputData.length > 0 ? (
-                    <DataTable data={inputData} />
-                ) : (
-                    <div style={{
-                        padding: '48px 24px',
-                        textAlign: 'center',
-                        border: '1px dashed var(--md-sys-color-outline-variant)',
-                        borderRadius: '8px'
-                    }}>
-                        <span className="material-symbols-outlined" style={{fontSize: '48px', color: 'var(--md-sys-color-surface-variant)'}}>file_upload</span>
-                        <h3 className="md-typescale-title-medium" style={{marginTop: '16px'}}>Awaiting Input</h3>
-                        <p className="md-typescale-body-medium" style={{color: 'var(--md-sys-color-on-surface-variant)'}}>
-                            {placeholder}
-                        </p>
-                    </div>
-                )}
-            </div>
-            
-            <div style={{ display: 'flex', gap: '16px', alignItems: 'center', justifyContent: 'center' }}>
-                <md-filled-icon-button onClick={handleAnalyze} disabled={isLoading || inputData.length === 0} title="Analyze Entries">
-                    <span className="material-symbols-outlined">science</span>
-                </md-filled-icon-button>
-                {isLoading && (
-                    <md-outlined-button onClick={handleAbort}>
-                         <span className="material-symbols-outlined" slot="icon">cancel</span>
-                        Abort
-                    </md-outlined-button>
-                )}
-            </div>
+            )}
+             {dataToDisplay.length === 0 && (
+                <p>No data to display. Use the Parser module to load data first.</p>
+            )}
 
-            {/* Output Section */}
-            <div>
-                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                    <h3 className="md-typescale-title-medium">Analyzed Output</h3>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <md-icon-button onClick={() => handleCopy(outputData, setOutputCopyIcon)} disabled={outputData.length === 0 || isLoading} title="Copy as JSON">
-                            <span className="material-symbols-outlined">{outputCopyIcon}</span>
-                        </md-icon-button>
-                        <md-icon-button onClick={() => setOutputData([])} disabled={outputData.length === 0 || isLoading} title="Clear Output">
-                            <span className="material-symbols-outlined">delete_sweep</span>
-                        </md-icon-button>
-                    </div>
-                </div>
-                {outputData.length > 0 ? (
-                    <DataTable data={outputData} />
-                ) : (
-                    <div style={{
-                        padding: '48px 24px',
-                        textAlign: 'center',
-                        border: '1px dashed var(--md-sys-color-outline-variant)',
-                        borderRadius: '8px'
-                    }}>
-                        <span className="material-symbols-outlined" style={{fontSize: '48px', color: 'var(--md-sys-color-surface-variant)'}}>lab_profile</span>
-                        <h3 className="md-typescale-title-medium" style={{marginTop: '16px'}}>Analysis Will Appear Here</h3>
-                        <p className="md-typescale-body-medium" style={{color: 'var(--md-sys-color-on-surface-variant)'}}>{placeholder}</p>
-                    </div>
-                )}
-            </div>
         </ModuleWrapper>
     );
 };
