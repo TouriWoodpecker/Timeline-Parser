@@ -1,113 +1,157 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { ModuleWrapper } from './ModuleWrapper';
 import { findKeyInsights } from '../../services/analysisService';
-import { exportTextFile } from '../../services/fileService';
 import { ParsedEntry, KeyInsights } from '../../types';
+import { getRandomQuote } from '../../utils/quotes';
+import { DataTable } from '../DataTable';
+import { processCsvFile } from '../../services/fileService';
 import { renderMarkdown } from '../../utils/markdown';
 
 interface InsightsModuleProps {
-    analyzedData: ParsedEntry[];
-    keyInsights: KeyInsights | null;
-    setKeyInsights: (insights: KeyInsights | null) => void;
-    setLoading: (loading: boolean, message?: string) => void;
+    setLoading: (loading: boolean) => void;
+    setLoadingMessage: (message: string) => void;
+    setStatusMessage: (message: string) => void;
+    setError: (error: string | null) => void;
 }
 
 export const InsightsModule: React.FC<InsightsModuleProps> = ({
-    analyzedData,
-    keyInsights,
-    setKeyInsights,
     setLoading,
+    setLoadingMessage,
+    setStatusMessage,
+    setError,
 }) => {
-    const [error, setError] = useState<string>('');
-    const hasAnalyzedData = analyzedData.some(d => d.kernaussage);
+    const [data, setData] = useState<ParsedEntry[]>([]);
+    const [insights, setInsights] = useState<KeyInsights | null>(null);
+    const [placeholder] = useState(getRandomQuote());
+    const [isLoading, setIsLoading] = useState(false); // Local state for button disable
 
-    const handleFindInsights = useCallback(async () => {
-        if (!hasAnalyzedData) {
-            setError("No analyzed data available. Please run the analysis first.");
-            return;
-        }
-        setError('');
-        setKeyInsights(null);
+    const handleImportCsv = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
 
         try {
-            setLoading(true, 'Synthesizing key insights from analyzed data...');
-            const insights = await findKeyInsights(analyzedData);
-            setKeyInsights(insights);
-        } catch (err: any) {
-            setError(`Failed to find insights: ${err.message}`);
-            console.error(err);
-        } finally {
-            setLoading(false);
-        }
-    }, [analyzedData, hasAnalyzedData, setLoading, setKeyInsights]);
-    
-    const handleExport = () => {
-        if (keyInsights) {
-            const content = `
-# Key Insights Report
-
-## Summary
-${keyInsights.summary}
-
----
-
-## Top 3 Insights
-
-${keyInsights.insights.map(insight => `
-### ${insight.title}
-**Description:** ${insight.description}
-**References:** ${insight.references}
-`).join('\n---\n')}
-            `;
-            exportTextFile(content.trim(), 'key-insights.md', 'text/markdown');
+            const { data: importedData, warnings } = await processCsvFile(file);
+            setData(importedData);
+            let message = `Successfully imported ${importedData.length} entries for insights generation.`;
+            if (warnings.length > 0) {
+                message += `\n\nWarnings:\n- ${warnings.join('\n- ')}`;
+            }
+            setStatusMessage(message);
+            setError(null);
+        } catch (e: any) {
+            setError(`Failed to import CSV: ${e.message}`);
         }
     };
+
+    const handleFindInsights = async () => {
+        if (data.length === 0) {
+            setError("Please import a file with analyzed entries first.");
+            return;
+        }
+
+        setError(null);
+        setInsights(null);
+        setIsLoading(true);
+        setLoading(true);
+        setLoadingMessage('Finding key insights...');
+
+        try {
+            const result = await findKeyInsights(data);
+            setInsights(result);
+            setStatusMessage('Key insights generated successfully.');
+        } catch (e: any) {
+            setError(`Failed to find insights: ${e.message}`);
+        } finally {
+            setIsLoading(false);
+            setLoading(false);
+            setLoadingMessage('');
+        }
+    };
+    
+    const triggerCsvUpload = () => document.getElementById('insights-csv-upload')?.click();
 
     return (
         <ModuleWrapper
             title="Insights"
-            description="Synthesize the analyzed protocol to extract a high-level summary and the top three most significant or surprising insights."
+            description="Import a CSV file containing analyzed entries to generate a high-level summary and identify the top three key insights from the data."
         >
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <md-filled-button onClick={handleFindInsights} disabled={!hasAnalyzedData}>
-                    <span className="material-symbols-outlined" style={{ marginRight: '8px' }}>insights</span>
-                    Find Key Insights
-                </md-filled-button>
-            </div>
-            {error && <div style={{ color: 'var(--md-sys-color-error)' }}>{error}</div>}
-
-            {!hasAnalyzedData && !keyInsights && (
-                <p>No analyzed data to process. Use the Analyzer module first.</p>
-            )}
-
-            {keyInsights && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-                    <div>
-                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                            <h3 className="md-typescale-title-medium">Generated Report</h3>
-                            <md-filled-tonal-button onClick={handleExport}>
-                                <span className="material-symbols-outlined" style={{ marginRight: '8px' }}>download</span>
-                                Export as Markdown
-                            </md-filled-tonal-button>
-                        </div>
-                        <div className="card" style={{ padding: '24px' }}>
-                            <h4 className="md-typescale-title-large">Summary</h4>
-                            <div className="md-typescale-body-large" dangerouslySetInnerHTML={{ __html: renderMarkdown(keyInsights.summary) }} />
-                        </div>
+            <input type="file" onChange={handleImportCsv} style={{ display: 'none' }} accept=".csv" id="insights-csv-upload" />
+            
+            {/* Input Section */}
+            <div>
+                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h3 className="md-typescale-title-medium">Input Data</h3>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <md-icon-button onClick={triggerCsvUpload} disabled={isLoading} title="Import Analyzed CSV">
+                            <span className="material-symbols-outlined">upload</span>
+                        </md-icon-button>
+                        <md-icon-button onClick={() => setData([])} disabled={data.length === 0 || isLoading} title="Clear Data">
+                            <span className="material-symbols-outlined">delete_sweep</span>
+                        </md-icon-button>
                     </div>
+                </div>
+                 {data.length > 0 ? (
+                    <>
+                        <p className="md-typescale-body-medium" style={{marginBottom: '16px', color: 'var(--md-sys-color-on-surface-variant)'}}>
+                            {data.length} entries loaded and ready for insight generation.
+                        </p>
+                        <DataTable data={data} />
+                    </>
+                 ) : (
+                     <div style={{
+                        padding: '48px 24px',
+                        textAlign: 'center',
+                        border: '1px dashed var(--md-sys-color-outline-variant)',
+                        borderRadius: '8px'
+                    }}>
+                        <span className="material-symbols-outlined" style={{fontSize: '48px', color: 'var(--md-sys-color-surface-variant)'}}>file_upload</span>
+                        <h3 className="md-typescale-title-medium" style={{marginTop: '16px'}}>Awaiting Data</h3>
+                        <p className="md-typescale-body-medium" style={{color: 'var(--md-sys-color-on-surface-variant)'}}>{placeholder}</p>
+                    </div>
+                 )}
+            </div>
 
-                    <div>
-                        <h4 className="md-typescale-title-large">Top 3 Insights</h4>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                            {keyInsights.insights.map((insight, index) => (
-                                <div key={index} className="card" style={{ padding: '24px' }}>
-                                    <h5 className="md-typescale-title-medium" style={{ margin: '0 0 8px 0' }}>{insight.title}</h5>
-                                    <p className="md-typescale-body-medium" dangerouslySetInnerHTML={{ __html: renderMarkdown(insight.description) }} style={{ margin: '0 0 16px 0' }} />
-                                    <p className="md-typescale-label-large" style={{ color: 'var(--md-sys-color-on-surface-variant)', margin: 0 }}>
-                                        References: {insight.references}
-                                    </p>
-                                </div>
-                            ))}
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '16px 0'}}>
+                <md-filled-icon-button onClick={handleFindInsights} disabled={isLoading || data.length === 0} title="Find Insights">
+                    <span className="material-symbols-outlined">insights</span>
+                </md-filled-icon-button>
+            </div>
+            
+            {insights && (
+                <div style={{ 
+                    border: '1px solid var(--md-sys-color-outline-variant)',
+                    borderRadius: '12px',
+                    padding: '24px',
+                    backgroundColor: 'var(--md-sys-color-surface-container-highest)'
+                }}>
+                    <h3 className="md-typescale-title-large">Generated Insights</h3>
+                    <div style={{marginTop: '16px'}}>
+                        <p className="md-typescale-body-large" dangerouslySetInnerHTML={{ __html: renderMarkdown(insights.summary) }} />
+                        <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                        {insights.insights.map((item, index) => (
+                            <div key={index} style={{
+                            border: '1px solid var(--md-sys-color-outline-variant)',
+                            borderRadius: '8px',
+                            padding: '16px'
+                            }}>
+                            <h4
+                                className="md-typescale-title-medium"
+                                style={{ margin: '0 0 8px 0' }}
+                                dangerouslySetInnerHTML={{ __html: renderMarkdown(`${index + 1}. **${item.title}**`) }}
+                            />
+                            <p
+                                className="md-typescale-body-medium"
+                                style={{ margin: '0 0 12px 0' }}
+                                dangerouslySetInnerHTML={{ __html: renderMarkdown(item.description) }}
+                            />
+                            <p
+                                className="md-typescale-label-large"
+                                style={{ margin: 0, color: 'var(--md-sys-color-on-surface-variant)', fontFamily: 'monospace' }}
+                            >
+                                Belege: {item.references}
+                            </p>
+                            </div>
+                        ))}
                         </div>
                     </div>
                 </div>

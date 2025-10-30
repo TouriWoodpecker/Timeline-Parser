@@ -1,76 +1,105 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+
+// Core components
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
+
+// Toolbox components
 import { Toolbox } from './Toolbox';
-import { getRandomQuote } from './utils/quotes';
+import { LandingPage } from './components/toolbox/LandingPage';
 
 function App() {
   const [toolboxView, setToolboxView] = useState<'landing' | 'tools'>('landing');
-  const [activeTabIndex, setActiveTabIndex] = useState(0);
-  const [headerMessage, setHeaderMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [isHeaderVisible, setIsHeaderVisible] = useState(true);
-
-  const headerRef = useRef<HTMLElement>(null);
+  const [activeToolboxTab, setActiveToolboxTab] = useState(2); // Home is default
   
+  // Global loading and status state for the toolbox
+  const [isToolboxLoading, setIsToolboxLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  
+  // Header state
+  const [headerMessage, setHeaderMessage] = useState('');
+  const headerRef = useRef<HTMLElement>(null);
+  const headerMessageTimeoutRef = useRef<number | null>(null);
+
+  // Effect to manage the global header message
+  useEffect(() => {
+    if (headerMessageTimeoutRef.current) {
+        clearTimeout(headerMessageTimeoutRef.current);
+    }
+
+    let message = '';
+    let isSticky = false;
+    let isError = false;
+
+    if (isToolboxLoading && loadingMessage) {
+        message = loadingMessage;
+        isSticky = true;
+    } else if (error) {
+        message = `Error: ${error}`;
+        isError = true;
+    } else if (statusMessage) {
+        message = statusMessage;
+    }
+
+    setHeaderMessage(message);
+
+    if (message && !isSticky) {
+        const timeoutDuration = isError ? 6000 : 4000;
+        headerMessageTimeoutRef.current = window.setTimeout(() => {
+            setHeaderMessage('');
+            if(statusMessage) setStatusMessage('');
+            if(error) setError(null);
+        }, timeoutDuration);
+    }
+  }, [isToolboxLoading, loadingMessage, statusMessage, error]);
+
+  // --- Handlers --- //
+  const handleSelectModule = (index: number) => {
+      setActiveToolboxTab(index);
+      setToolboxView('tools');
+  };
+
   const handleGoHome = () => {
     setToolboxView('landing');
-    setHeaderMessage('');
-  };
-
-  const handleTabSelect = (index: number) => {
-    setToolboxView('tools');
-    setActiveTabIndex(index);
-  };
-
-  const handleSetLoading = (loading: boolean, message: string = '') => {
-    setIsLoading(loading);
-    if (loading) {
-      setHeaderMessage(message || getRandomQuote());
-    } else {
-      setHeaderMessage('');
-    }
+    setActiveToolboxTab(2); // Home is index 2
   };
   
+  const renderCurrentView = () => {
+    if (toolboxView === 'landing') {
+      return <LandingPage onSelectModule={handleSelectModule} />;
+    }
+    return (
+      <Toolbox 
+          activeTab={activeToolboxTab}
+          setLoading={setIsToolboxLoading}
+          setLoadingMessage={setLoadingMessage}
+          setStatusMessage={setStatusMessage}
+          setError={setError}
+      />
+    );
+  };
+
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      minHeight: '100vh',
-      backgroundColor: 'var(--md-sys-color-surface)',
-      color: 'var(--md-sys-color-on-surface)',
-      transition: 'background-color 0.3s, color 0.3s'
-    }}>
+    <>
       <Header 
         ref={headerRef}
-        isVisible={isHeaderVisible}
+        isVisible={true} // Header is always visible now
         message={headerMessage}
-        isLoading={isLoading}
+        isLoading={isToolboxLoading}
       />
-      <main style={{
-        flexGrow: 1,
-        padding: '24px',
-        paddingTop: `calc(80px + 24px)`, // Header height + padding
-        paddingBottom: `calc(80px + 24px)`, // Footer height + padding
-        maxWidth: '1200px',
-        width: '100%',
-        margin: '0 auto',
-        boxSizing: 'border-box'
-      }}>
-        <Toolbox
-          view={toolboxView}
-          activeTabIndex={activeTabIndex}
-          onSelectModule={handleTabSelect}
-          setLoading={handleSetLoading}
-        />
+      <main>
+        {renderCurrentView()}
       </main>
-      <Footer
+      <Footer 
         toolboxView={toolboxView}
-        activeTabIndex={activeTabIndex}
-        onTabSelect={handleTabSelect}
+        activeTabIndex={activeToolboxTab}
+        onTabSelect={handleSelectModule} // Re-use for direct tab selection
         onGoHome={handleGoHome}
       />
-    </div>
+      {/* FabMenu is removed as the app is now toolbox-only */}
+    </>
   );
 }
 
